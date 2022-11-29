@@ -1,0 +1,11 @@
+{
+  "importMap": "import_map.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "fmt": {
+    "options": {
+      "lineWidth": 100
+    }
+  }
+}
