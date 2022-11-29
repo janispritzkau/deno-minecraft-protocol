@@ -49,6 +49,18 @@
     "https://deno.land/x/crypto@v0.10.0/src/aes/consts.ts": "582aeed7afda2fe3deac4a60c4a9f29c60a7fb66f56645f95fa0ddab49bde994",
     "https://deno.land/x/crypto@v0.10.0/src/aes/mod.ts": "afa8c53d140a4f5c12d17ed03aef7f7d3186b3848f7ff4c73e9e758bba47b101",
     "https://deno.land/x/crypto@v0.10.0/src/block-modes/base.ts": "ed96f69c0855ffc2d34ffbab293ac131dd4fd3d24e6d8ccd86e2a2f9f898c9b5",
-    "https://deno.land/x/crypto@v0.10.0/src/utils/padding.ts": "db60b542bf7629fada4a9b92dbae7fcfc7d074a325f3b4e6d5a269b16546aa9b"
+    "https://deno.land/x/crypto@v0.10.0/src/utils/padding.ts": "db60b542bf7629fada4a9b92dbae7fcfc7d074a325f3b4e6d5a269b16546aa9b",
+    "https://deno.land/x/minecraft_lib@0.0.10/crypto/aes.ts": "81ca8e74f2124814d69775cc37c9f60858492f01d46175b47d7f07740892aecf",
+    "https://deno.land/x/minecraft_lib@0.0.10/io/mod.ts": "e944bd33c450b48186b8886d073a9f7cecb6386198332b45b38f9f9b0719dfd8",
+    "https://deno.land/x/minecraft_lib@0.0.10/io/reader.ts": "85892cbd49712df9a17b03c6662d7b08aa796d49e9bdd22b50ae0eb00d8b3f89",
+    "https://deno.land/x/minecraft_lib@0.0.10/io/writer.ts": "3e577c18895ae3d57bf4ae07099ebcfc17dbb356fb58df64802af2bd65b51d9e",
+    "https://deno.land/x/minecraft_lib@0.0.10/nbt/_tag.ts": "619d386a896fb9525e5b322d6fc027a517285f69b3949c0a82adfd4978278059",
+    "https://deno.land/x/minecraft_lib@0.0.10/nbt/io.ts": "f9ac977ad4f6fbfbf44a3567dd74d6f295218884a9a9208620bf2f7a102b55c9",
+    "https://deno.land/x/minecraft_lib@0.0.10/nbt/tag.ts": "19d7eb237d1615b52fb19211185f6d34078a2553c9b280607d333996ec06dcf4",
+    "https://deno.land/x/minecraft_lib@0.0.10/network/address.ts": "a5c08def89831189ce8e314d1fbffc83c2e1ff5cc4246a6b8d10edba3a2a60d1",
+    "https://deno.land/x/minecraft_lib@0.0.10/network/connection.ts": "7b6dd1ef22a49825e06537b3e3f5248c0f823c566806e065f2133d53aa859b57",
+    "https://deno.land/x/minecraft_lib@0.0.10/network/mod.ts": "69f14fae7221e890892c44684799d22368ed0d65115fa7912281f46846059ec6",
+    "https://deno.land/x/minecraft_lib@0.0.10/network/packet.ts": "40defa389f1d7dd80dc69ff67dc20c2637e2ac4ad47a9d593f6a7fb51fd9a8c4",
+    "https://deno.land/x/minecraft_lib@0.0.10/network/protocol.ts": "aa3c7de53c5c56908362409abf37fcdfb8104f59489ffac64ce243e8f90cf357"
   }
 }

@@ -1,5 +1,5 @@
 {
   "imports": {
-    "minecraft/": "../deno-minecraft/"
+    "minecraft/": "https://deno.land/x/minecraft_lib@0.0.10/"
   }
 }
