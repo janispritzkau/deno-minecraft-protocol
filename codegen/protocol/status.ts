@@ -1,5 +1,5 @@
 import { flow, packet, protocol } from "../protocol.ts";
-import { Json, Long } from "../types.ts";
+import { Json, Long, Serializable } from "../types.ts";
 
 protocol("status");
 
@@ -14,7 +14,11 @@ packet("ServerboundPingRequestPacket", {
 flow("clientbound");
 
 packet("ClientboundStatusResponsePacket", {
-  status: Json.alias("ServerStatus"),
+  status: Serializable("ServerStatus", Json, (value, { use }) => {
+    return `${use("deserializeServerStatus")}(${value})`;
+  }, (value, { use }) => {
+    return `${use("serializeServerStatus")}(${value})`;
+  }),
 });
 
 packet("ClientboundPongResponsePacket", {

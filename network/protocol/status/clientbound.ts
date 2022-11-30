@@ -1,8 +1,7 @@
 // deno-lint-ignore-file
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
-
-export type ServerStatus = unknown;
+import { deserializeServerStatus, serializeServerStatus, ServerStatus } from "./server_status.ts";
 
 export interface ClientStatusHandler extends PacketHandler {
   handleStatusResponse?(packet: ClientboundStatusResponsePacket): Promise<void>;
@@ -14,11 +13,11 @@ export class ClientboundStatusResponsePacket implements Packet<ClientStatusHandl
     public status: ServerStatus,
   ) {}
   static read(reader: Reader) {
-    const status = reader.readJson();
+    const status = deserializeServerStatus(reader.readJson());
     return new this(status);
   }
   write(writer: Writer) {
-    writer.writeJson(this.status);
+    writer.writeJson(serializeServerStatus(this.status));
   }
   async handle(handler: ClientStatusHandler) {
     await handler.handleStatusResponse?.(this);

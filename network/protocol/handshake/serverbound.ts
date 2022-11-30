@@ -3,13 +3,13 @@ import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
 import { createEnumMapper } from "../types.ts";
 
-export type HandshakeIntention = "status" | "login";
-
-export const handshakeIntentionEnum = createEnumMapper<HandshakeIntention>({ "status": 1, "login": 2 });
-
 export interface ServerHandshakeHandler extends PacketHandler {
   handleIntention?(packet: ClientIntentionPacket): Promise<void>;
 }
+
+export type HandshakeIntention = "status" | "login";
+
+const handshakeIntentionEnum = createEnumMapper<HandshakeIntention>({ "status": 1, "login": 2 });
 
 export class ClientIntentionPacket implements Packet<ServerHandshakeHandler> {
   constructor(

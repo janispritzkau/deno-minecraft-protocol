@@ -1,6 +1,8 @@
 // deno-lint-ignore-file
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { CompoundTag } from "minecraft/nbt/tag.ts";
+import { Uuid } from "../../core/uuid.ts";
+import { Component } from "../../chat/component.ts";
 
 export type ChatType =
   | "minecraft:chat"
@@ -4183,14 +4185,14 @@ export function writeProperties(writer: Writer, value: Properties) {
   }
 }
 
-export type GameProfile = { id: string; name: string; properties: Properties };
+export type GameProfile = { id: Uuid; name: string; properties: Properties };
 
 export function readGameProfile(reader: Reader): GameProfile {
-  return { id: reader.readUuid(), name: reader.readString(16), properties: readProperties(reader) };
+  return { id: Uuid.from(reader.read(16)), name: reader.readString(16), properties: readProperties(reader) };
 }
 
 export function writeGameProfile(writer: Writer, value: GameProfile) {
-  writer.writeUuid(value.id);
+  writer.write(value.id.bytes());
   writer.writeString(value.name);
   writeProperties(writer, value.properties);
 }
@@ -4320,7 +4322,7 @@ export type CommandArgument =
   | { type: "brigadier:double"; min: number | null; max: number | null }
   | { type: "brigadier:integer"; min: number | null; max: number | null }
   | { type: "brigadier:long"; min: bigint | null; max: bigint | null }
-  | { type: "brigadier:string"; template: "single_word" | "quotable_phrase" | "greedy_phrase" }
+  | { type: "brigadier:string"; template: BrigadierStringTemplate }
   | { type: "entity"; single: boolean; playersOnly: boolean }
   | { type: "game_profile" }
   | { type: "block_pos" }
@@ -4364,7 +4366,13 @@ export type CommandArgument =
   | { type: "template_rotation" }
   | { type: "uuid" };
 
-export const mapper = createEnumMapper({ "single_word": 0, "quotable_phrase": 1, "greedy_phrase": 2 });
+export type BrigadierStringTemplate = "single_word" | "quotable_phrase" | "greedy_phrase";
+
+export const brigadierStringTemplateEnum = createEnumMapper<BrigadierStringTemplate>({
+  "single_word": 0,
+  "quotable_phrase": 1,
+  "greedy_phrase": 2,
+});
 
 export function readCommandArgument(reader: Reader): CommandArgument {
   let result: CommandArgument;
@@ -4397,7 +4405,7 @@ export function readCommandArgument(reader: Reader): CommandArgument {
       break;
     }
     case 5:
-      result = { type: "brigadier:string", template: mapper.fromId(reader.readVarInt()) };
+      result = { type: "brigadier:string", template: brigadierStringTemplateEnum.fromId(reader.readVarInt()) };
       break;
     case 6: {
       const type = "entity";
@@ -4589,7 +4597,7 @@ export function writeCommandArgument(writer: Writer, value: CommandArgument) {
     }
     case "brigadier:string": {
       writer.writeVarInt(5);
-      writer.writeVarInt(mapper.toId(value.template));
+      writer.writeVarInt(brigadierStringTemplateEnum.toId(value.template));
       break;
     }
     case "entity": {
@@ -4883,32 +4891,36 @@ export function writeCommandNode(writer: Writer, value: CommandNode) {
   }
 }
 
-export type SignedMessageHeader = { previousSignature: MessageSignature | null; sender: string };
+export type SignedMessageHeader = { previousSignature: MessageSignature | null; sender: Uuid };
 
 export type MessageSignature = Uint8Array;
 
 export function readSignedMessageHeader(reader: Reader): SignedMessageHeader {
-  return { previousSignature: reader.readBoolean() ? reader.readByteArray() : null, sender: reader.readUuid() };
+  return {
+    previousSignature: reader.readBoolean() ? reader.readByteArray() : null,
+    sender: Uuid.from(reader.read(16)),
+  };
 }
 
 export function writeSignedMessageHeader(writer: Writer, value: SignedMessageHeader) {
   writer.writeBoolean(value.previousSignature != null);
   if (value.previousSignature != null) writer.writeByteArray(value.previousSignature);
-  writer.writeUuid(value.sender);
+  writer.write(value.sender.bytes());
 }
 
 export type ChatMessageContent = { plain: string; decorated: Component | null };
 
-export type Component = unknown;
-
 export function readChatMessageContent(reader: Reader): ChatMessageContent {
-  return { plain: reader.readString(256), decorated: reader.readBoolean() ? reader.readJson() : null };
+  return {
+    plain: reader.readString(256),
+    decorated: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
+  };
 }
 
 export function writeChatMessageContent(writer: Writer, value: ChatMessageContent) {
   writer.writeString(value.plain);
   writer.writeBoolean(value.decorated != null);
-  if (value.decorated != null) writer.writeJson(value.decorated);
+  if (value.decorated != null) writer.writeJson(value.decorated.serialize());
 }
 
 export type Instant = bigint;
@@ -4921,14 +4933,14 @@ export function writeInstant(writer: Writer, value: Instant) {
   writer.writeLong(value);
 }
 
-export type LastSeenMessagesEntry = { profileId: string; lastSignature: MessageSignature | null };
+export type LastSeenMessagesEntry = { profileId: Uuid; lastSignature: MessageSignature | null };
 
 export function readLastSeenMessagesEntry(reader: Reader): LastSeenMessagesEntry {
-  return { profileId: reader.readUuid(), lastSignature: reader.readBoolean() ? reader.readByteArray() : null };
+  return { profileId: Uuid.from(reader.read(16)), lastSignature: reader.readBoolean() ? reader.readByteArray() : null };
 }
 
 export function writeLastSeenMessagesEntry(writer: Writer, value: LastSeenMessagesEntry) {
-  writer.writeUuid(value.profileId);
+  writer.write(value.profileId.bytes());
   writer.writeBoolean(value.lastSignature != null);
   if (value.lastSignature != null) writer.writeByteArray(value.lastSignature);
 }
@@ -5030,7 +5042,7 @@ export function readPlayerChatMessage(reader: Reader): PlayerChatMessage {
     signedHeader: readSignedMessageHeader(reader),
     headerSignature: reader.readByteArray(),
     signedBody: readSignedMessageBody(reader),
-    unsignedContent: reader.readBoolean() ? reader.readJson() : null,
+    unsignedContent: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
     filterMask: readFilterMask(reader),
   };
 }
@@ -5040,7 +5052,7 @@ export function writePlayerChatMessage(writer: Writer, value: PlayerChatMessage)
   writer.writeByteArray(value.headerSignature);
   writeSignedMessageBody(writer, value.signedBody);
   writer.writeBoolean(value.unsignedContent != null);
-  if (value.unsignedContent != null) writer.writeJson(value.unsignedContent);
+  if (value.unsignedContent != null) writer.writeJson(value.unsignedContent.serialize());
   writeFilterMask(writer, value.filterMask);
 }
 
@@ -5049,16 +5061,16 @@ export type ChatTypeBound = { chatType: ChatType; name: Component; targetName: C
 export function readChatTypeBound(reader: Reader): ChatTypeBound {
   return {
     chatType: chatTypeEnum.fromId(reader.readVarInt()),
-    name: reader.readJson(),
-    targetName: reader.readBoolean() ? reader.readJson() : null,
+    name: Component.deserialize(reader.readJson()),
+    targetName: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
   };
 }
 
 export function writeChatTypeBound(writer: Writer, value: ChatTypeBound) {
   writer.writeVarInt(chatTypeEnum.toId(value.chatType));
-  writer.writeJson(value.name);
+  writer.writeJson(value.name.serialize());
   writer.writeBoolean(value.targetName != null);
-  if (value.targetName != null) writer.writeJson(value.targetName);
+  if (value.targetName != null) writer.writeJson(value.targetName.serialize());
 }
 
 export type ArgumentSignatureEntry = { name: string; signature: MessageSignature };

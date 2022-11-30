@@ -20,6 +20,7 @@ export interface Capture<T> {
   value: T;
   statements: Statement[];
   readonly statementBlock: string;
+  map<T>(fn: (capture: Capture<T>) => T): T;
 }
 
 export interface CaptureOptions {
@@ -32,30 +33,46 @@ export interface CaptureOptions {
 export interface TypeContext {
   readonly reader: string;
   readonly writer: string;
-  global(name: string, init?: string): string;
-  constant(key: symbol, expression?: string): string;
-  /** Pushes a statement to the stack. */
+
+  use(symbol: string): string;
+
+  global(name: string, init?: (identifier: string, isExported: boolean) => string): string;
+
+  constant(name: symbol, expression?: string): string;
+
+  /** Pushes a statement onto the stack. */
   statement(code: string): void;
+
   /** Defines a let variable. */
   declare(name: string, type?: string, expression?: string, hasSideEffect?: boolean): Variable;
-  /** Defines a const variable with lazy evaluated expression. */
+
+  /** Defines a const variable with a lazy evaluated expression. */
   declare(name: string, evaluate: () => string, hasSideEffect?: boolean, type?: string): Variable;
-  /** Captures variable declarations and statements declared inside the callback function. */
-  capture<T>(fn: () => T, options?: CaptureOptions): Capture<T>;
+
   alias(type: Type, name: string): void;
   alias(type: Type): string | null;
+
   type(type: Type): string;
+
+  /** Captures variable declarations and statements declared inside the callback function. */
+  capture<T>(fn: () => T, options?: CaptureOptions): Capture<T>;
 }
 
 export interface TypeContextOptions {
-  defineGlobal(init: string, name: string): void;
-  defineConstant(name: string, expression: string): string;
-  onUse?(name: string): void;
+  declare(
+    name: string,
+    init: (identifier: string, isExported: boolean) => string,
+    isGlobal: boolean,
+  ): string;
+  use(symbol: string): void;
 }
 
 export function createTypeContext(options: TypeContextOptions): TypeContext {
-  const globals = new Set<string>();
+  /** Global name to identifier mapping. */
+  const globals = new Map<string, string>();
+  /** Constant key to identifier mapping. */
   const constants = new Map<symbol, string>();
+
   const typeAliases = new Map<string, string>();
 
   const stack: Statement[][] = [];
@@ -92,27 +109,32 @@ export function createTypeContext(options: TypeContextOptions): TypeContext {
       return currentWriter;
     },
 
+    use(symbol) {
+      options.use(symbol);
+      return symbol;
+    },
+
     global(name, init) {
-      options.onUse?.(name);
-      if (globals.has(name)) return name;
-      if (init == null) throw new Error("Global not defined");
-      options.defineGlobal(init, name);
-      globals.add(name);
-      return name;
+      let identifier = globals.get(name);
+      if (identifier != null && init == null) options.use(identifier);
+      if (identifier != null) return identifier;
+      if (init == null) throw new Error(`Global '${name}' is not defined`);
+      identifier = options.declare(name, init, true);
+      globals.set(name, identifier);
+      return identifier;
     },
 
     constant(key, expression) {
-      let name = constants.get(key);
-      if (name != null) {
-        options.onUse?.(name);
-        return name;
-      }
-      if (key.description == null) throw new Error("Key must have a description");
-      if (expression == null) throw new Error("Constant is not defined");
-      name = options.defineConstant(key.description, expression);
-      constants.set(key, name);
-      options.onUse?.(name);
-      return name;
+      let identifier = constants.get(key);
+      if (identifier != null && expression == null) options.use(identifier);
+      if (identifier != null) return identifier;
+      if (key.description == null) throw new Error("Constant key must have a description");
+      if (expression == null) throw new Error(`Constant '${key.description}' is not defined`);
+      identifier = options.declare(key.description, (identifier, isExported) => {
+        return (isExported ? "export " : "") + `const ${identifier} = ${expression};\n`;
+      }, false);
+      constants.set(key, identifier);
+      return identifier;
     },
 
     statement(code) {
@@ -181,26 +203,35 @@ export function createTypeContext(options: TypeContextOptions): TypeContext {
       const value = fn();
       [currentReader, currentWriter] = [reader, writer];
       const statements = stack.pop()!.filter((stmt) => variableStatements.get(stmt)?.used ?? true);
-      return {
+      const capture: Capture<ReturnType<typeof fn>> = {
         value,
         statements,
         get statementBlock() {
           return statements.map((stmt) => stmt.code).join("");
         },
+        map(fn) {
+          return fn(capture as Capture<any>);
+        },
       };
+      return capture;
     },
 
     alias(type, alias?: string) {
       if (alias == null) {
         const alias = typeAliases.get(type.definition);
-        if (alias) options.onUse?.(alias);
+        if (alias) options.use(alias);
         return alias ?? null;
       }
       if (type instanceof DocumentedType) {
-        context.global(alias, type.comment + `type ${alias} = ${type.definition};`);
+        alias = context.global(alias, (identifier, isExported) => {
+          return type.comment + (isExported ? "export " : "") +
+            `type ${identifier} = ${type.definition};\n`;
+        });
         typeAliases.set(type.inner.definition, alias);
       } else {
-        context.global(alias, `type ${alias} = ${type.definition};`);
+        alias = context.global(alias, (identifier, isExported) => {
+          return (isExported ? "export " : "") + `type ${identifier} = ${type.definition};\n`;
+        });
       }
       typeAliases.set(type.definition, alias);
       return alias;
@@ -208,7 +239,7 @@ export function createTypeContext(options: TypeContextOptions): TypeContext {
 
     type(type) {
       const alias = typeAliases.get(type.definition);
-      if (alias) options.onUse?.(alias);
+      if (alias) options.use(alias);
       return alias ?? type.definition;
     },
   };

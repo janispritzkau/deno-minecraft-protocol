@@ -79,6 +79,11 @@ export class NativeType extends Type {
   write(context: TypeContext, expression: string): void {
     context.statement(`${context.writer}.write${this.suffix}(${expression});`);
   }
+
+  // TODO: this is only temporary
+  init(context: TypeContext): void {
+    if (this.#definition == "CompoundTag | null") context.use("CompoundTag");
+  }
 }
 
 export class OptionalType extends Type {
@@ -313,7 +318,8 @@ function createEnumMapper<T extends string>(keyIds: Record<T, number>) {
       return key;
     },
   };
-}`;
+}
+`;
 
 export class EnumType extends Type {
   private mapper: symbol;
@@ -346,8 +352,10 @@ export class EnumType extends Type {
   }
 
   init(context: TypeContext): void {
-    super.init(context);
-    context.global("createEnumMapper", ENUM_MAPPER_FACTORY);
+    context.global("createEnumMapper", (identifier, isExported) => {
+      return (isExported ? "export " : "") +
+        ENUM_MAPPER_FACTORY.replace("createEnumMapper", identifier);
+    });
     const alias = context.alias(this);
     const mapperName = alias?.replace(/^./, (c) => c.toLowerCase()).replace(/$/, "Enum");
     if (mapperName && this.mapper.description != mapperName) this.mapper = Symbol(mapperName);
@@ -355,7 +363,7 @@ export class EnumType extends Type {
     const variantsJson = JSON.stringify(this.variants);
     context.constant(
       this.mapper,
-      `createEnumMapper${alias ? `<${alias}>` : ""}(${
+      `${context.global("createEnumMapper")}${alias ? `<${alias}>` : ""}(${
         variantsJson.length > 400
           ? "JSON.parse(`" + variantsJson + "`)"
           : `{ ${
@@ -385,10 +393,7 @@ export class TaggedUnionType extends Type {
   }
 
   get subtypes(): Type[] {
-    return [
-      this.tagType,
-      ...Object.values(this.variants).flatMap((struct) => [struct, ...struct.subtypes]),
-    ];
+    return Object.values(this.variants).flatMap((struct) => [struct, ...struct.subtypes]);
   }
 
   get definition(): string {
@@ -439,6 +444,11 @@ export class TaggedUnionType extends Type {
         }).join("")
       }default:\nthrow new Error("Invalid tag");\n}`,
     );
+  }
+
+  init(context: TypeContext): void {
+    super.init(context);
+    this.tagType.init(context);
   }
 }
 
@@ -575,6 +585,16 @@ export class DefinitionType extends Type {
   }
 }
 
+export class ImportedType extends DefinitionType {
+  constructor(public name: string) {
+    super(name);
+  }
+
+  init(context: TypeContext): void {
+    context.use(this.name);
+  }
+}
+
 export class ExpressionType extends DefinitionType {
   constructor(definition: string, private expression: string) {
     super(definition);
@@ -692,25 +712,28 @@ export class ExportedType extends AliasedType {
     if (initInnerType) super.init(context);
     if (this.inner instanceof EnumType) return;
 
-    const readerCapture = context.capture(() => {
-      return this.inner.read(context);
-    }, { reader: "reader" });
+    context.global(this.readFn, (identifier, isExported) => {
+      return `${
+        isExported ? "export " : ""
+      } function ${identifier}(reader: Reader): ${this.name} {\n${
+        context.capture(() => {
+          return this.inner.read(context);
+        }, { reader: "reader" }).map((capture) => {
+          return `${capture.statementBlock}return ${capture.value};\n`;
+        })
+      }}\n`;
+    });
 
-    context.global(
-      this.readFn,
-      `function ${this.readFn}(reader: Reader): ${this.name} {\n${readerCapture.statementBlock}return ${readerCapture.value};\n}`,
-    );
-
-    const writerCapture = context.capture(() => {
-      const value = context.declare("value");
-      this.inner.write(context, value.identifier);
-      return value.identifier;
-    }, { writer: "writer" });
-
-    context.global(
-      this.writeFn,
-      `function ${this.writeFn}(writer: Writer, ${writerCapture.value}: ${this.name}) {\n${writerCapture.statementBlock}}`,
-    );
+    context.global(this.writeFn, (identifier, isExported) => {
+      return `${
+        isExported ? "export " : ""
+      }function ${identifier}(writer: Writer, value: ${this.name}) {\n${
+        context.capture(() => {
+          context.declare("value");
+          this.inner.write(context, "value");
+        }, { writer: "writer" }).statementBlock
+      }}\n`;
+    });
   }
 }
 
@@ -736,8 +759,8 @@ export class SerializableType extends Type {
   constructor(
     private name: string,
     private value: Type,
-    private deserializer: (value: string) => string,
-    private serializer: (value: string) => string,
+    private deserializer: (value: string, context: TypeContext) => string,
+    private serializer: (value: string, context: TypeContext) => string,
   ) {
     super();
   }
@@ -747,11 +770,15 @@ export class SerializableType extends Type {
   }
 
   read(context: TypeContext): string {
-    return this.deserializer(this.value.read(context));
+    return this.deserializer(this.value.read(context), context);
   }
 
   write(context: TypeContext, expression: string): void {
-    this.value.write(context, this.serializer(expression));
+    this.value.write(context, this.serializer(expression, context));
+  }
+
+  init(context: TypeContext): void {
+    context.use(this.name);
   }
 }
 

@@ -1,9 +1,9 @@
 import {
-  AliasedType,
   BitFlagsType,
   CustomStructType,
   CustomType,
   EnumType,
+  ImportedType,
   ListType,
   LiteralType,
   MapType,
@@ -31,10 +31,8 @@ export const Double = new NativeType("Double", "number");
 export const VarInt = new NativeType("VarInt", "number");
 export const VarLong = new NativeType("VarLong", "bigint");
 export const Boolean = new NativeType("Boolean", "boolean");
-export const Uuid = new NativeType("Uuid", "string");
-export const Nbt = new NativeType("CompoundTag", "CompoundTag | null");
 export const Json = new NativeType("Json", "unknown");
-export const Component = new AliasedType("Component", Json);
+export const Nbt = new NativeType("CompoundTag", "CompoundTag | null");
 
 export const String = (
   maxLength?: number,
@@ -102,8 +100,8 @@ export const Custom = (
 export const Serializable = (
   name: string,
   value: Type,
-  deserializer: (value: string) => string,
-  serializer: (value: string) => string,
+  deserializer: (value: string, context: TypeContext) => string,
+  serializer: (value: string, context: TypeContext) => string,
 ) => new SerializableType(name, value, deserializer, serializer);
 
 export const CustomStruct = (
@@ -111,6 +109,20 @@ export const CustomStruct = (
   readFn: (context: TypeContext) => Record<string, Variable>,
   writeFn: (context: TypeContext, value: string) => void,
 ) => new CustomStructType(fieldDefinitions, readFn, writeFn);
+
+export const Uuid = Serializable(
+  "Uuid",
+  Data(16),
+  (buf) => `Uuid.from(${buf})`,
+  (uuid) => `${uuid}.bytes()`,
+);
+
+export const Component = Serializable(
+  "Component",
+  Json,
+  (value) => `Component.deserialize(${value})`,
+  (component) => `${component}.serialize()`,
+);
 
 export const Date = Serializable(
   "Date",

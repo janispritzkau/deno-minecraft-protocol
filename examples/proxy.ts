@@ -4,6 +4,7 @@ import * as flags from "https://deno.land/std@0.166.0/flags/mod.ts";
 import * as C from "https://deno.land/std@0.166.0/fmt/colors.ts";
 import { equals } from "https://deno.land/std@0.166.0/bytes/equals.ts";
 import { assertEquals } from "https://deno.land/std@0.166.0/testing/asserts.ts";
+import { Component } from "../chat/component.ts";
 import {
   Connection,
   Packet,
@@ -14,6 +15,7 @@ import {
   ServerAddress,
 } from "minecraft/network/mod.ts";
 import {
+  ClientboundAddEntityPacket,
   ClientboundForgetLevelChunkPacket,
   ClientboundGameProfilePacket,
   ClientboundLevelChunkWithLightPacket,
@@ -38,6 +40,8 @@ import {
   statusProtocol,
 } from "../network/protocol/mod.ts";
 
+if (!Deno.isatty(Deno.stdout.rid)) C.setColorEnabled(false);
+
 const FILTERED_PACKETS = new Set<Function>([
   ServerboundMovePlayerPosPacket,
   ServerboundMovePlayerPosRotPacket,
@@ -46,6 +50,7 @@ const FILTERED_PACKETS = new Set<Function>([
   ClientboundLightUpdatePacket,
   ClientboundLevelChunkWithLightPacket,
   ClientboundForgetLevelChunkPacket,
+  ClientboundAddEntityPacket,
   ClientboundMoveEntityPosPacket,
   ClientboundMoveEntityPosRotPacket,
   ClientboundMoveEntityRotPacket,
@@ -82,7 +87,14 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
     }
 
     if (packet && flow) {
-      internalLog(flow, Deno.inspect(packet, { colors: true, depth: 5, iterableLimit: 20 }));
+      internalLog(
+        flow,
+        Deno.inspect(packet, {
+          colors: C.getColorEnabled(),
+          depth: 6,
+          iterableLimit: 24,
+        }),
+      );
     }
   };
 
@@ -143,7 +155,9 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
         client.setCompressionThreshold(packet.compressionThreshold);
       },
       async handleHello() {
-        await conn.send(new ClientboundLoginDisconnectPacket({ text: "Encryption not supported" }));
+        await conn.send(
+          new ClientboundLoginDisconnectPacket(Component.literal("Encryption not supported")),
+        );
         client.close();
       },
     });

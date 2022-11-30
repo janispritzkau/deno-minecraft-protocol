@@ -227,7 +227,7 @@ packet("ServerboundPlayerActionPacket", {
 
 packet("ServerboundPlayerCommandPacket", {
   id: VarInt,
-  action: Enum([
+  command: Enum([
     "press_shift_key",
     "release_shift_key",
     "stop_sleeping",
@@ -237,7 +237,7 @@ packet("ServerboundPlayerCommandPacket", {
     "stop_riding_jump",
     "open_inventory",
     "start_fall_flying",
-  ], VarInt),
+  ]).alias("PlayerCommand"),
   data: VarInt,
 });
 
@@ -269,7 +269,12 @@ packet("ServerboundRenameItemPacket", {
 });
 
 packet("ServerboundResourcePackPacket", {
-  action: Enum(["successfully_loaded", "declined", "failed_download", "accepted"], VarInt),
+  action: Enum([
+    "successfully_loaded",
+    "declined",
+    "failed_download",
+    "accepted",
+  ]).alias("ResourcePackAction"),
 });
 
 packet("ServerboundSeenAdvancementsPacket", {

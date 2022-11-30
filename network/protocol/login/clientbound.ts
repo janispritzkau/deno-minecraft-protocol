@@ -1,15 +1,13 @@
 // deno-lint-ignore-file
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
+import { Component } from "../../../chat/component.ts";
 import {
-  Component,
   GameProfile,
   readGameProfile,
-  readProperties,
   readResourceLocation,
   ResourceLocation,
   writeGameProfile,
-  writeProperties,
   writeResourceLocation,
 } from "../types.ts";
 
@@ -26,11 +24,11 @@ export class ClientboundLoginDisconnectPacket implements Packet<ClientLoginHandl
     public reason: Component,
   ) {}
   static read(reader: Reader) {
-    const reason = reader.readJson();
+    const reason = Component.deserialize(reader.readJson());
     return new this(reason);
   }
   write(writer: Writer) {
-    writer.writeJson(this.reason);
+    writer.writeJson(this.reason.serialize());
   }
   async handle(handler: ClientLoginHandler) {
     await handler.handleLoginDisconnect?.(this);

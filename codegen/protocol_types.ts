@@ -286,7 +286,11 @@ const CommandMinMaxArgument = (type: Type) => {
   });
 };
 
-const BrigadierStringTemplate = Enum(["single_word", "quotable_phrase", "greedy_phrase"]);
+const BrigadierStringTemplate = Enum([
+  "single_word",
+  "quotable_phrase",
+  "greedy_phrase",
+]).alias("BrigadierStringTemplate");
 
 const CommandArgument = type("CommandArgument")(TaggedUnion("type", VarInt, {
   "brigadier:bool": null,

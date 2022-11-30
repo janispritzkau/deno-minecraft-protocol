@@ -2,6 +2,7 @@
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
 import { ProfilePublicKey, readProfilePublicKey, writeProfilePublicKey } from "../types.ts";
+import { Uuid } from "../../../core/uuid.ts";
 
 export interface ServerLoginHandler extends PacketHandler {
   handleHello?(packet: ServerboundHelloPacket): Promise<void>;
@@ -13,12 +14,12 @@ export class ServerboundHelloPacket implements Packet<ServerLoginHandler> {
   constructor(
     public name: string,
     public publicKey: ProfilePublicKey | null,
-    public profileId: string | null,
+    public profileId: Uuid | null,
   ) {}
   static read(reader: Reader) {
     const name = reader.readString(16);
     const publicKey = reader.readBoolean() ? readProfilePublicKey(reader) : null;
-    const profileId = reader.readBoolean() ? reader.readUuid() : null;
+    const profileId = reader.readBoolean() ? Uuid.from(reader.read(16)) : null;
     return new this(name, publicKey, profileId);
   }
   write(writer: Writer) {
@@ -26,7 +27,7 @@ export class ServerboundHelloPacket implements Packet<ServerLoginHandler> {
     writer.writeBoolean(this.publicKey != null);
     if (this.publicKey != null) writeProfilePublicKey(writer, this.publicKey);
     writer.writeBoolean(this.profileId != null);
-    if (this.profileId != null) writer.writeUuid(this.profileId);
+    if (this.profileId != null) writer.write(this.profileId.bytes());
   }
   async handle(handler: ServerLoginHandler) {
     await handler.handleHello?.(this);

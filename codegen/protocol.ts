@@ -2,7 +2,7 @@ import * as path from "https://deno.land/std@0.166.0/path/mod.ts";
 import * as fs from "https://deno.land/std@0.166.0/fs/mod.ts";
 
 import { createTypeContext, TypeContext, Variable } from "./type_context.ts";
-import { DocumentedType, ExportedType, Type } from "./type.ts";
+import { AliasedType, DocumentedType, ExportedType, Type } from "./type.ts";
 import { format, formatDocComment } from "./utils.ts";
 
 export type Flow = "serverbound" | "clientbound";
@@ -112,8 +112,12 @@ export function packet(
   return packet;
 }
 
+export interface GenerateOptions {
+  imports?: Record<string, string[]>;
+}
+
 /** Generates the modules for all types and protocols. */
-export async function generate(outputPath: string): Promise<void> {
+export async function generate(outputPath: string, options?: GenerateOptions): Promise<void> {
   console.log("generating protocol");
 
   await fs.ensureDir(path.resolve(outputPath));
@@ -123,28 +127,45 @@ export async function generate(outputPath: string): Promise<void> {
     await Deno.writeTextFile(path.resolve(outputPath, filePath), code);
   };
 
+  const importMap = new SymbolImportMap();
+  if (options?.imports) {
+    for (const path in options.imports) {
+      for (const symbol of options.imports[path]!) {
+        importMap.add(symbol, path);
+      }
+    }
+  }
+
+  const imports = (moduleDir: string, symbols: string[]) => {
+    let code = "";
+    for (const [importPath, importedSymbols] of importMap.imports(symbols)) {
+      code += `import { ${importedSymbols.join(", ")} } from "${
+        importPath.startsWith("./")
+          ? path.relative(path.resolve(outputPath, moduleDir), importPath).replace(/^(?!\.)/, "./")
+          : importPath
+      }";\n`;
+    }
+    return code;
+  };
+
   const symbols = new Set<string>();
   const usedSymbols = new Set<string>();
-  let moduleInit = "// deno-lint-ignore-file\n";
-  moduleInit += `import { Reader, Writer } from "minecraft/io/mod.ts";\n`;
-  moduleInit += `import { CompoundTag } from "minecraft/nbt/tag.ts";\n`;
-  moduleInit += "\n";
+  let exportConstants = true;
+
+  let moduleInit = "";
 
   const context = createTypeContext({
-    defineGlobal(init, name) {
-      moduleInit += "export " + init + "\n\n";
-      symbols.add(name);
-    },
-    defineConstant(name, expression) {
+    declare(symbol, init, isGlobal) {
       let suffix = 0;
-      while (symbols.has(name + (suffix || ""))) suffix++;
-      name += suffix || "";
-      moduleInit += `export const ${name} = ${expression};\n\n`;
-      symbols.add(name);
-      return name;
+      while (symbols.has(symbol + (suffix || ""))) suffix++;
+      symbol += suffix || "";
+      moduleInit += init(symbol, isGlobal || exportConstants) + "\n";
+      symbols.add(symbol);
+      return symbol;
     },
-    onUse(name) {
-      usedSymbols.add(name);
+    use(symbol) {
+      if (symbol in globalThis) return;
+      usedSymbols.add(symbol);
     },
   });
 
@@ -152,9 +173,19 @@ export async function generate(outputPath: string): Promise<void> {
     type.init(context, true);
   }
 
-  await output("types.ts", moduleInit.trimEnd() + "\n");
+  await output(
+    "types.ts",
+    "// deno-lint-ignore-file\n" + imports("./", [
+      "Reader",
+      "Writer",
+      ...[...usedSymbols].filter((symbol) => !symbols.has(symbol)),
+    ]) + "\n" + moduleInit.trimEnd() + "\n",
+  );
 
-  const typesSymbols = new Set(symbols);
+  for (const symbol of symbols) {
+    importMap.add(symbol, "./" + path.join(outputPath, "types.ts"));
+  }
+  symbols.clear();
 
   for (const protocol of protocols.values()) {
     const protocolName = protocol.name.replace(/^./, (c) => c.toUpperCase());
@@ -170,21 +201,7 @@ export async function generate(outputPath: string): Promise<void> {
     for (const [flow, flowShort] of flows) {
       moduleInit = "";
       usedSymbols.clear();
-      for (const packet of protocol.packets[flow]) {
-        for (
-          const type of Object.values(packet.fields).flatMap((type) => [type, ...type.subtypes])
-        ) {
-          if (type instanceof ExportedType) {
-            usedSymbols.add(type.name);
-          } else if (type.definition == "CompoundTag | null") {
-            usedSymbols.add("CompoundTag");
-          }
-        }
-
-        for (const type of Object.values(packet.fields)) {
-          type.init(context);
-        }
-      }
+      exportConstants = false;
 
       const handler = flowShort + protocolName + "Handler";
       let moduleCode = "";
@@ -195,17 +212,30 @@ export async function generate(outputPath: string): Promise<void> {
         }?(packet: ${packet.name}): Promise<void>;`;
       }
       moduleCode += `}\n\n`;
+      importMap.add(handler, "./" + path.join(outputPath, `${protocol.name}/${flow}.ts`));
 
       for (const packet of protocol.packets[flow]) {
-        if (packet.description) moduleCode += formatDocComment(packet.description);
-        moduleCode += `export class ${packet.name} implements Packet<${handler}> {\n`;
-
-        moduleCode += `constructor(\n`;
-        for (const [name, type] of Object.entries(packet.fields)) {
-          if (type instanceof DocumentedType) moduleCode += type.comment;
-          moduleCode += `public ${name}: ${type.definition},\n`;
+        for (
+          const type of Object.values(packet.fields)
+            .flatMap((type) => [type, ...type.subtypes])
+        ) {
+          if (type instanceof AliasedType) {
+            usedSymbols.add(type.definition);
+          }
         }
-        moduleCode += `) {}\n`;
+
+        for (const type of Object.values(packet.fields)) type.init(context);
+
+        let packetCode = "";
+        if (packet.description) moduleCode += formatDocComment(packet.description);
+        packetCode += `export class ${packet.name} implements Packet<${handler}> {\n`;
+
+        packetCode += `constructor(\n`;
+        for (const [name, type] of Object.entries(packet.fields)) {
+          if (type instanceof DocumentedType) packetCode += type.comment;
+          packetCode += `public ${name}: ${type.definition},\n`;
+        }
+        packetCode += `) {}\n`;
 
         const capture = context.capture(() => {
           if (packet.reader) {
@@ -220,43 +250,49 @@ export async function generate(outputPath: string): Promise<void> {
             return variable;
           });
         });
-        moduleCode += `static read(reader: Reader) {\n${capture.statementBlock}return new this(${
+        packetCode += `static read(reader: Reader) {\n${capture.statementBlock}return new this(${
           capture.value.map((variable) => variable.use()).join(", ")
         });\n}\n`;
 
-        moduleCode += `write(writer: Writer) {\n`;
+        packetCode += `write(writer: Writer) {\n`;
         if (packet.writer) {
           const { writer } = packet;
-          moduleCode += context.capture(() => writer(context)).statementBlock;
+          packetCode += context.capture(() => writer(context)).statementBlock;
         } else {
           for (const [name, type] of Object.entries(packet.fields)) {
             const capture = context.capture(() => type.write(context, `this.${name}`));
-            moduleCode += capture.statementBlock;
+            packetCode += capture.statementBlock;
           }
         }
-        moduleCode += `}\n`;
+        packetCode += `}\n`;
 
-        moduleCode += `async handle(handler: ${handler}) {\nawait handler.handle${
+        packetCode += `async handle(handler: ${handler}) {\nawait handler.handle${
           packet.name.replace(/^(?:Client|Server)(?:bound)?(\w+)Packet$/, "$1")
         }?.(this);\n}\n`;
 
         for (const method of packet.methods) {
-          moduleCode += `${method.declaration} {\n${method.body.trimEnd()}\n}\n`;
+          packetCode += `${method.declaration} {\n${method.body.trimEnd()}\n}\n`;
         }
 
-        moduleCode += `}\n\n`;
+        packetCode += `}\n\n`;
+
+        moduleCode += moduleInit + packetCode;
+        moduleInit = "";
+
+        importMap.add(packet.name, "./" + path.join(outputPath, `${protocol.name}/${flow}.ts`));
       }
 
       let moduleImports = "// deno-lint-ignore-file\n";
-      moduleImports += `import { Reader, Writer } from "minecraft/io/mod.ts";\n`;
-      if (usedSymbols.has("CompoundTag")) {
-        moduleImports += `import { CompoundTag } from "minecraft/nbt/tag.ts";\n`;
-      }
-      moduleImports += `import { Packet, PacketHandler } from "minecraft/network/packet.ts";\n`;
-      const importedTypes = [...usedSymbols].filter((name) => typesSymbols.has(name));
-      if (importedTypes.length > 0) {
-        moduleImports += `import { ${importedTypes.join(", ")} } from "../types.ts";\n`;
-      }
+      moduleImports += imports(
+        protocol.name,
+        [
+          "Reader",
+          "Writer",
+          "Packet",
+          "PacketHandler",
+          ...usedSymbols,
+        ].filter((symbol) => !symbols.has(symbol)),
+      );
 
       await output(
         `${protocol.name}/${flow}.ts`,
@@ -265,14 +301,12 @@ export async function generate(outputPath: string): Promise<void> {
     }
 
     let moduleCode = "// deno-lint-ignore-file\n";
-    moduleCode += `import { Protocol } from "minecraft/network/protocol.ts";\n`;
-    for (const [flow, flowShort] of flows) {
-      const imports = [
-        flowShort + protocolName + "Handler",
-        ...protocol.packets[flow].map((p) => p.name),
-      ];
-      moduleCode += `import { ${imports.join(", ")} } from "./${flow}.ts"\n`;
-    }
+    moduleCode += imports(protocol.name, [
+      "Protocol",
+      ...flows.flatMap(([flow, flowShort]) => {
+        return [flowShort + protocolName + "Handler", ...protocol.packets[flow].map((p) => p.name)];
+      }),
+    ]);
     moduleCode += "\n";
 
     moduleCode +=
@@ -300,4 +334,29 @@ export async function generate(outputPath: string): Promise<void> {
     moduleCode += `export * from "./${protocol.name}/mod.ts";\n`;
   }
   await output(`mod.ts`, moduleCode);
+}
+
+class SymbolImportMap {
+  #importMap: Map<string, Set<string>> = new Map();
+  #symbolMap: Map<string, string> = new Map();
+
+  add(symbol: string, path: string) {
+    const symbols = this.#importMap.get(path) ?? new Set();
+    this.#importMap.set(path, symbols);
+    symbols.add(symbol);
+    if (this.#symbolMap.has(symbol)) throw new Error(`Symbol '${symbol}' is already imported`);
+    this.#symbolMap.set(symbol, path);
+  }
+
+  imports(symbols: string[]) {
+    const imports = new Map<string, string[]>();
+    for (const symbol of symbols) {
+      const path = this.#symbolMap.get(symbol);
+      if (path == null) throw new Error(`Could not import symbol '${symbol}'`);
+      const importedSymbols = imports.get(path) ?? [];
+      imports.set(path, importedSymbols);
+      importedSymbols.push(symbol);
+    }
+    return imports;
+  }
 }

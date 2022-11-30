@@ -15,7 +15,6 @@ import {
   humanoidArmEnum,
   InteractionHand,
   interactionHandEnum,
-  itemEnum,
   ItemStack,
   LastSeenMessagesUpdate,
   MessageSignature,
@@ -23,92 +22,21 @@ import {
   mobEffectEnum,
   PlayerAction,
   playerActionEnum,
-  readArgumentSignatureEntry,
   readArgumentSignatures,
   readBlockPos,
   readItemStack,
-  readLastSeenMessagesEntry,
   readLastSeenMessagesUpdate,
   readResourceLocation,
   RecipeBookType,
   recipeBookTypeEnum,
   ResourceLocation,
-  writeArgumentSignatureEntry,
   writeArgumentSignatures,
   writeBlockPos,
   writeItemStack,
-  writeLastSeenMessagesEntry,
   writeLastSeenMessagesUpdate,
   writeResourceLocation,
 } from "../types.ts";
-
-export type ClientCommandAction = "perform_respawn" | "request_stats";
-
-export const clientCommandActionEnum = createEnumMapper<ClientCommandAction>({
-  "perform_respawn": 0,
-  "request_stats": 1,
-});
-
-export const mapper1 = createEnumMapper({
-  "press_shift_key": 0,
-  "release_shift_key": 1,
-  "stop_sleeping": 2,
-  "start_sprinting": 3,
-  "stop_sprinting": 4,
-  "start_riding_jump": 5,
-  "stop_riding_jump": 6,
-  "open_inventory": 7,
-  "start_fall_flying": 8,
-});
-
-export const mapper2 = createEnumMapper({
-  "successfully_loaded": 0,
-  "declined": 1,
-  "failed_download": 2,
-  "accepted": 3,
-});
-
-export type CommandBlockMode = "sequence" | "auto" | "redstone";
-
-export const commandBlockModeEnum = createEnumMapper<CommandBlockMode>({ "sequence": 0, "auto": 1, "redstone": 2 });
-
-export type JigsawBlockJointType = "rollable" | "aligned";
-
-export const jigsawBlockJointTypeEnum = createEnumMapper<JigsawBlockJointType>({ "rollable": 0, "aligned": 1 });
-
-export type StructureBlockUpdateType = "update_data" | "save_area" | "load_area" | "scan_area";
-
-export const structureBlockUpdateTypeEnum = createEnumMapper<StructureBlockUpdateType>({
-  "update_data": 0,
-  "save_area": 1,
-  "load_area": 2,
-  "scan_area": 3,
-});
-
-export type StructureMode = "save" | "load" | "corner" | "data";
-
-export const structureModeEnum = createEnumMapper<StructureMode>({ "save": 0, "load": 1, "corner": 2, "data": 3 });
-
-export type Mirror = "none" | "left_right" | "front_back";
-
-export const mirrorEnum = createEnumMapper<Mirror>({ "none": 0, "left_right": 1, "front_back": 2 });
-
-export type Rotation = "none" | "clockwise_90" | "clockwise_180" | "counterclockwise_90";
-
-export const rotationEnum = createEnumMapper<Rotation>({
-  "none": 0,
-  "clockwise_90": 1,
-  "clockwise_180": 2,
-  "counterclockwise_90": 3,
-});
-
-export type BlockHitResult = {
-  blockPos: BlockPos;
-  direction: Direction;
-  /** Position relative to the block's origin. */
-  location: { x: number; y: number; z: number };
-  inside: boolean;
-};
+import { Uuid } from "../../../core/uuid.ts";
 
 export interface ServerGameHandler extends PacketHandler {
   handleAcceptTeleportation?(packet: ServerboundAcceptTeleportationPacket): Promise<void>;
@@ -311,6 +239,10 @@ export class ServerboundChatPreviewPacket implements Packet<ServerGameHandler> {
     await handler.handleChatPreview?.(this);
   }
 }
+
+export type ClientCommandAction = "perform_respawn" | "request_stats";
+
+const clientCommandActionEnum = createEnumMapper<ClientCommandAction>({ "perform_respawn": 0, "request_stats": 1 });
 
 export class ServerboundClientCommandPacket implements Packet<ServerGameHandler> {
   constructor(
@@ -877,30 +809,44 @@ export class ServerboundPlayerActionPacket implements Packet<ServerGameHandler> 
   }
 }
 
+export type PlayerCommand =
+  | "press_shift_key"
+  | "release_shift_key"
+  | "stop_sleeping"
+  | "start_sprinting"
+  | "stop_sprinting"
+  | "start_riding_jump"
+  | "stop_riding_jump"
+  | "open_inventory"
+  | "start_fall_flying";
+
+const playerCommandEnum = createEnumMapper<PlayerCommand>({
+  "press_shift_key": 0,
+  "release_shift_key": 1,
+  "stop_sleeping": 2,
+  "start_sprinting": 3,
+  "stop_sprinting": 4,
+  "start_riding_jump": 5,
+  "stop_riding_jump": 6,
+  "open_inventory": 7,
+  "start_fall_flying": 8,
+});
+
 export class ServerboundPlayerCommandPacket implements Packet<ServerGameHandler> {
   constructor(
     public id: number,
-    public action:
-      | "press_shift_key"
-      | "release_shift_key"
-      | "stop_sleeping"
-      | "start_sprinting"
-      | "stop_sprinting"
-      | "start_riding_jump"
-      | "stop_riding_jump"
-      | "open_inventory"
-      | "start_fall_flying",
+    public command: PlayerCommand,
     public data: number,
   ) {}
   static read(reader: Reader) {
     const id = reader.readVarInt();
-    const action = mapper1.fromId(reader.readVarInt());
+    const command = playerCommandEnum.fromId(reader.readVarInt());
     const data = reader.readVarInt();
-    return new this(id, action, data);
+    return new this(id, command, data);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.id);
-    writer.writeVarInt(mapper1.toId(this.action));
+    writer.writeVarInt(playerCommandEnum.toId(this.command));
     writer.writeVarInt(this.data);
   }
   async handle(handler: ServerGameHandler) {
@@ -1001,16 +947,25 @@ export class ServerboundRenameItemPacket implements Packet<ServerGameHandler> {
   }
 }
 
+export type ResourcePackAction = "successfully_loaded" | "declined" | "failed_download" | "accepted";
+
+const resourcePackActionEnum = createEnumMapper<ResourcePackAction>({
+  "successfully_loaded": 0,
+  "declined": 1,
+  "failed_download": 2,
+  "accepted": 3,
+});
+
 export class ServerboundResourcePackPacket implements Packet<ServerGameHandler> {
   constructor(
-    public action: "successfully_loaded" | "declined" | "failed_download" | "accepted",
+    public action: ResourcePackAction,
   ) {}
   static read(reader: Reader) {
-    const action = mapper2.fromId(reader.readVarInt());
+    const action = resourcePackActionEnum.fromId(reader.readVarInt());
     return new this(action);
   }
   write(writer: Writer) {
-    writer.writeVarInt(mapper2.toId(this.action));
+    writer.writeVarInt(resourcePackActionEnum.toId(this.action));
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleResourcePack?.(this);
@@ -1113,6 +1068,10 @@ export class ServerboundSetCarriedItemPacket implements Packet<ServerGameHandler
   }
 }
 
+export type CommandBlockMode = "sequence" | "auto" | "redstone";
+
+const commandBlockModeEnum = createEnumMapper<CommandBlockMode>({ "sequence": 0, "auto": 1, "redstone": 2 });
+
 export class ServerboundSetCommandBlockPacket implements Packet<ServerGameHandler> {
   constructor(
     public pos: BlockPos,
@@ -1182,6 +1141,10 @@ export class ServerboundSetCreativeModeSlotPacket implements Packet<ServerGameHa
   }
 }
 
+export type JigsawBlockJointType = "rollable" | "aligned";
+
+const jigsawBlockJointTypeEnum = createEnumMapper<JigsawBlockJointType>({ "rollable": 0, "aligned": 1 });
+
 export class ServerboundSetJigsawBlockPacket implements Packet<ServerGameHandler> {
   constructor(
     public pos: BlockPos,
@@ -1212,6 +1175,32 @@ export class ServerboundSetJigsawBlockPacket implements Packet<ServerGameHandler
     await handler.handleSetJigsawBlock?.(this);
   }
 }
+
+export type StructureBlockUpdateType = "update_data" | "save_area" | "load_area" | "scan_area";
+
+const structureBlockUpdateTypeEnum = createEnumMapper<StructureBlockUpdateType>({
+  "update_data": 0,
+  "save_area": 1,
+  "load_area": 2,
+  "scan_area": 3,
+});
+
+export type StructureMode = "save" | "load" | "corner" | "data";
+
+const structureModeEnum = createEnumMapper<StructureMode>({ "save": 0, "load": 1, "corner": 2, "data": 3 });
+
+export type Mirror = "none" | "left_right" | "front_back";
+
+const mirrorEnum = createEnumMapper<Mirror>({ "none": 0, "left_right": 1, "front_back": 2 });
+
+export type Rotation = "none" | "clockwise_90" | "clockwise_180" | "counterclockwise_90";
+
+const rotationEnum = createEnumMapper<Rotation>({
+  "none": 0,
+  "clockwise_90": 1,
+  "clockwise_180": 2,
+  "counterclockwise_90": 3,
+});
 
 export class ServerboundSetStructureBlockPacket implements Packet<ServerGameHandler> {
   constructor(
@@ -1312,19 +1301,27 @@ export class ServerboundSwingPacket implements Packet<ServerGameHandler> {
 
 export class ServerboundTeleportToEntityPacket implements Packet<ServerGameHandler> {
   constructor(
-    public uuid: string,
+    public uuid: Uuid,
   ) {}
   static read(reader: Reader) {
-    const uuid = reader.readUuid();
+    const uuid = Uuid.from(reader.read(16));
     return new this(uuid);
   }
   write(writer: Writer) {
-    writer.writeUuid(this.uuid);
+    writer.write(this.uuid.bytes());
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleTeleportToEntity?.(this);
   }
 }
+
+export type BlockHitResult = {
+  blockPos: BlockPos;
+  direction: Direction;
+  /** Position relative to the block's origin. */
+  location: { x: number; y: number; z: number };
+  inside: boolean;
+};
 
 export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
   constructor(
