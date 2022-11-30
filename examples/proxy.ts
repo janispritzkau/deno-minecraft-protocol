@@ -23,6 +23,7 @@ import {
   ClientboundMoveEntityPosRotPacket,
   ClientboundMoveEntityRotPacket,
   ClientboundRotateHeadPacket,
+  ClientboundSetEntityDataPacket,
   ClientboundSetEntityMotionPacket,
   ClientboundTeleportEntityPacket,
   ClientboundUpdateAttributesPacket,
@@ -51,6 +52,7 @@ const FILTERED_PACKETS = new Set<Function>([
   ClientboundRotateHeadPacket,
   ClientboundTeleportEntityPacket,
   ClientboundUpdateAttributesPacket,
+  ClientboundSetEntityDataPacket,
 ]);
 
 async function handleConnection(conn: Connection, address: ServerAddress, netAddr: string) {
@@ -141,7 +143,6 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
       },
       async handleHello() {
         await conn.send(new ClientboundLoginDisconnectPacket({ text: "Encryption not supported" }));
-        conn.close();
         client.close();
       },
     });
@@ -163,7 +164,7 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
         assertEquals(serialized, buf, "Mismatch between deserialization and serialization");
       }
 
-      if (clientHandler) packet.handle(clientHandler);
+      if (clientHandler) await packet.handle(clientHandler);
       if (packet instanceof ClientboundLoginCompressionPacket) continue;
       await conn.send(packet);
 
@@ -190,7 +191,7 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
       assertEquals(serialized, buf, "Mismatch between deserialization and serialization");
     }
 
-    if (serverHandler) packet.handle(serverHandler);
+    if (serverHandler) await packet.handle(serverHandler);
     await client.send(packet);
   }
 
@@ -205,14 +206,14 @@ async function runProxyServer(port = 25566, connectAddress = "localhost:25565") 
   for await (const denoConn of listener) {
     const remoteNetAddr = denoConn.remoteAddr as Deno.NetAddr;
     const remoteAddr = `${remoteNetAddr.hostname}:${remoteNetAddr.port}`;
-    console.log("new incoming connection", C.gray(remoteAddr));
+    console.log(new Date(), C.gray(remoteAddr), C.brightGreen("incoming connection"));
 
     const connection = new Connection(denoConn);
     await handleConnection(connection, serverAddress, remoteAddr).catch((e) => {
       console.error("error in server handler:", e);
     }).finally(() => {
       if (!connection.closed) connection.close();
-      console.log("connection closed", C.gray(remoteAddr));
+      console.log(new Date(), C.gray(remoteAddr), C.brightRed("connection closed"));
     });
   }
 }
