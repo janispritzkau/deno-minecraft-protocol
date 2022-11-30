@@ -265,22 +265,22 @@ export const ParticleOptions = (particleType: Type) => {
 
 const CommandMinMaxArgument = (type: Type) => {
   return CustomStruct({ min: Optional(type), max: Optional(type) }, (context) => {
-    const flags = context.declare("flags", () => UnsignedByte.reader(context));
+    const flags = context.declare("flags", () => UnsignedByte.read(context));
     return {
-      min: context.declare("min", () => `${flags.use()} & 0x1 ? ${type.reader(context)} : null`),
-      max: context.declare("max", () => `${flags.use()} & 0x2 ? ${type.reader(context)} : null`),
+      min: context.declare("min", () => `${flags.use()} & 0x1 ? ${type.read(context)} : null`),
+      max: context.declare("max", () => `${flags.use()} & 0x2 ? ${type.read(context)} : null`),
     };
   }, (context, arg) => {
     const { statement, capture } = context;
-    UnsignedByte.writer(context, `-(${arg}.min != null) & 0x1 | -(${arg}.max != null) & 0x2`);
+    UnsignedByte.write(context, `-(${arg}.min != null) & 0x1 | -(${arg}.max != null) & 0x2`);
     statement(`if (${arg}.min != null) {\n${
       capture(() => {
-        type.writer(context, `${arg}.min`);
+        type.write(context, `${arg}.min`);
       }).statementBlock
     }}`);
     statement(`if (${arg}.max != null) {\n${
       capture(() => {
-        type.writer(context, `${arg}.max`);
+        type.write(context, `${arg}.max`);
       }).statementBlock
     }}`);
   });
@@ -357,24 +357,24 @@ export const CommandNode = type("CommandNode")(CustomStruct({
 }, (context) => {
   const { reader, declare, statement, capture } = context;
 
-  const flags = declare("flags", () => Byte.reader(context));
+  const flags = declare("flags", () => Byte.read(context));
   const isExecutable = declare("isExecutable", () => `(${flags.use()} & 0x4) != 0`);
-  const children = declare("children", () => List(VarInt).reader(context));
+  const children = declare("children", () => List(VarInt).read(context));
 
   const redirectNode = declare("redirectNode", "number | null", "null");
   statement(`if ((${flags.use()} & 0x8) != 0) ${redirectNode.use()} = ${reader}.readVarInt()`);
 
   const node = declare("node", Optional(CommandNodeStub).definition, "null");
   const { value: literalValue, statementBlock: literalStatements } = capture(() =>
-    `{ type: "literal", id: ${String().reader(context)} }`
+    `{ type: "literal", id: ${String().read(context)} }`
   );
 
   const type = `(${flags.use()} & 0x3)`;
   statement(`if (${type} == 1) {\n${literalStatements}${node.use()} = ${literalValue};\n}`);
   const { value: argumentValue, statementBlock: argumentStatements } = capture(() =>
-    `{ type: "argument", id: ${declare("id", () => String().reader(context)).use()}, argument: ${
-      declare("argument", () => CommandArgument.reader(context)).use()
-    }, suggestionId: ((${flags.use()} & 0x10) != 0) ? ${ResourceLocation.reader(context)} : null }`
+    `{ type: "argument", id: ${declare("id", () => String().read(context)).use()}, argument: ${
+      declare("argument", () => CommandArgument.read(context)).use()
+    }, suggestionId: ((${flags.use()} & 0x10) != 0) ? ${ResourceLocation.read(context)} : null }`
   );
   statement(`else if (${type} == 2) {\n${argumentStatements}${node.use()} = ${argumentValue};\n}`);
   statement(`else {\n${node.use()} = { type: "root" };\n}`);
@@ -392,25 +392,25 @@ export const CommandNode = type("CommandNode")(CustomStruct({
 
   const hasRedirect = `${node}.redirectNode != null)`;
   const hasSuggestion = `${node}.node.type == "argument" && ${node}.node.suggestionId != null`;
-  Byte.writer(
+  Byte.write(
     context,
     `${nodeType.use()} | -${node}.isExecutable & 0x4 | -(${hasRedirect} & 0x8 | -(${hasSuggestion}) & 0x10`,
   );
 
-  List(VarInt).writer(context, `${node}.children`);
+  List(VarInt).write(context, `${node}.children`);
 
   statement(`if (${node}.redirectNode != null) ${writer}.writeVarInt(${node}.redirectNode);\n`);
   statement(`if (${node}.node.type == "literal") ${
     capture(() => {
-      String().writer(context, `${node}.node.id`);
+      String().write(context, `${node}.node.id`);
     }).statementBlock
   }`);
   statement(`else if (${node}.node.type == "argument") {\n${
     capture(() => {
-      String().writer(context, `${node}.node.id`);
-      CommandArgument.writer(context, `${node}.node.argument`);
+      String().write(context, `${node}.node.id`);
+      CommandArgument.write(context, `${node}.node.argument`);
       statement(`if (${node}.node.suggestionId != null) {\n${
-        capture(() => ResourceLocation.writer(context, `${node}.node.suggestionId`)).statementBlock
+        capture(() => ResourceLocation.write(context, `${node}.node.suggestionId`)).statementBlock
       }}`);
     }).statementBlock
   }}`);
@@ -514,21 +514,6 @@ export const PlayerAction = type("PlayerAction")(Enum([
   "swap_item_with_offhand",
 ]));
 
-export const MerchantOffer = type("MerchantOffer")(Struct({
-  baseCostA: Item,
-  result: Item,
-  costB: Item,
-  isOutOfStock: Boolean,
-  uses: Int,
-  maxUses: Int,
-  xp: Int,
-  specialPriceDiff: Int,
-  priceMultiplier: Float,
-  demand: Int,
-}));
-
-export const MerchantOffers = type("MerchantOffers", List(MerchantOffer));
-
 export const InteractionHand = type("InteractionHand")(Enum([
   "main_hand",
   "off_hand",
@@ -541,27 +526,27 @@ export const RecipeBookType = type("RecipeBookType")(Enum([
   "smoker",
 ]));
 
-export const ChatFormatting = type("ChatFormatting")(Enum([
-  "black",
-  "dark_blue",
-  "dark_green",
-  "dark_aqua",
-  "dark_red",
-  "dark_purple",
-  "gold",
-  "gray",
-  "dark_gray",
-  "blue",
-  "green",
-  "aqua",
-  "red",
-  "light_purple",
-  "yellow",
-  "white",
-  "obfuscated",
-  "bold",
-  "strikethrough",
-  "underline",
-  "italic",
-  "reset", // -1 ?
-]));
+export const ChatFormatting = type("ChatFormatting")(Enum({
+  "black": 0,
+  "dark_blue": 1,
+  "dark_green": 2,
+  "dark_aqua": 3,
+  "dark_red": 4,
+  "dark_purple": 5,
+  "gold": 6,
+  "gray": 7,
+  "dark_gray": 8,
+  "blue": 9,
+  "green": 10,
+  "aqua": 11,
+  "red": 12,
+  "light_purple": 13,
+  "yellow": 14,
+  "white": 15,
+  "obfuscated": 16,
+  "bold": 17,
+  "strikethrough": 18,
+  "underline": 19,
+  "italic": 20,
+  "reset": -1,
+}));

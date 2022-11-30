@@ -28,8 +28,8 @@ export class ServerboundHelloPacket implements Packet<ServerLoginHandler> {
     writer.writeBoolean(this.profileId != null);
     if (this.profileId != null) writer.writeUuid(this.profileId);
   }
-  handle(handler: ServerLoginHandler) {
-    return handler.handleHello?.(this);
+  async handle(handler: ServerLoginHandler) {
+    await handler.handleHello?.(this);
   }
 }
 
@@ -76,8 +76,8 @@ export class ServerboundKeyPacket implements Packet<ServerLoginHandler> {
         throw new Error("Invalid tag");
     }
   }
-  handle(handler: ServerLoginHandler) {
-    return handler.handleKey?.(this);
+  async handle(handler: ServerLoginHandler) {
+    await handler.handleKey?.(this);
   }
 }
 
@@ -96,7 +96,7 @@ export class ServerboundCustomQueryPacket implements Packet<ServerLoginHandler> 
     writer.writeBoolean(this.data != null);
     if (this.data != null) writer.write(this.data);
   }
-  handle(handler: ServerLoginHandler) {
-    return handler.handleCustomQuery?.(this);
+  async handle(handler: ServerLoginHandler) {
+    await handler.handleCustomQuery?.(this);
   }
 }

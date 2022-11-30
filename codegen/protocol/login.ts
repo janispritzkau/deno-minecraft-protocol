@@ -17,7 +17,7 @@ import {
 
 import { GameProfile, ProfilePublicKey, ResourceLocation } from "../protocol_types.ts";
 
-protocol("login", 2);
+protocol("login");
 
 flow("clientbound");
 
@@ -32,7 +32,7 @@ packet("ClientboundHelloPacket", {
 });
 
 packet("ClientboundGameProfilePacket", {
-  gameProfile: GameProfile,
+  profile: GameProfile,
 });
 
 packet("ClientboundLoginCompressionPacket", {

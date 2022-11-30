@@ -1,4 +1,4 @@
-import { doc, flow, packet } from "../../protocol.ts";
+import { flow, packet } from "../../protocol.ts";
 import {
   BitFlags,
   Boolean,
@@ -77,8 +77,8 @@ packet("ServerboundChatPacket", {
 });
 
 packet("ServerboundChatPreviewPacket", {
-  queryId: Int,
-  query: String(256),
+  transactionId: Int,
+  message: String(256),
 });
 
 packet("ServerboundClientCommandPacket", {
@@ -97,7 +97,7 @@ packet("ServerboundClientInformationPacket", {
 });
 
 packet("ServerboundCommandSuggestionPacket", {
-  id: VarInt,
+  transactionId: VarInt,
   command: String(32500),
 });
 
@@ -387,9 +387,8 @@ packet("ServerboundUseItemOnPacket", {
   blockHit: Struct({
     blockPos: BlockPos,
     direction: Direction,
-    location: doc(
-      Struct({ x: Float, y: Float, z: Float }),
-      "Relative to the block position",
+    location: Struct({ x: Float, y: Float, z: Float }).doc(
+      "Position relative to the block's origin.",
     ),
     inside: Boolean,
   }).alias("BlockHitResult"),

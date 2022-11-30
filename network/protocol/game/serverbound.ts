@@ -15,6 +15,7 @@ import {
   humanoidArmEnum,
   InteractionHand,
   interactionHandEnum,
+  itemEnum,
   ItemStack,
   LastSeenMessagesUpdate,
   MessageSignature,
@@ -25,18 +26,9 @@ import {
   readArgumentSignatureEntry,
   readArgumentSignatures,
   readBlockPos,
-  readChatVisiblity,
-  readClickType,
-  readDirection,
-  readHumanoidArm,
-  readInteractionHand,
-  readItem,
   readItemStack,
   readLastSeenMessagesEntry,
   readLastSeenMessagesUpdate,
-  readMobEffect,
-  readPlayerAction,
-  readRecipeBookType,
   readResourceLocation,
   RecipeBookType,
   recipeBookTypeEnum,
@@ -44,67 +36,76 @@ import {
   writeArgumentSignatureEntry,
   writeArgumentSignatures,
   writeBlockPos,
-  writeChatVisiblity,
-  writeClickType,
-  writeDirection,
-  writeHumanoidArm,
-  writeInteractionHand,
-  writeItem,
   writeItemStack,
   writeLastSeenMessagesEntry,
   writeLastSeenMessagesUpdate,
-  writeMobEffect,
-  writePlayerAction,
-  writeRecipeBookType,
   writeResourceLocation,
 } from "../types.ts";
 
 export type ClientCommandAction = "perform_respawn" | "request_stats";
 
-export const clientCommandActionEnum = createEnumMapper<ClientCommandAction>(["perform_respawn", "request_stats"]);
+export const clientCommandActionEnum = createEnumMapper<ClientCommandAction>({
+  "perform_respawn": 0,
+  "request_stats": 1,
+});
 
-export const mapper1 = createEnumMapper([
-  "press_shift_key",
-  "release_shift_key",
-  "stop_sleeping",
-  "start_sprinting",
-  "stop_sprinting",
-  "start_riding_jump",
-  "stop_riding_jump",
-  "open_inventory",
-  "start_fall_flying",
-]);
+export const mapper1 = createEnumMapper({
+  "press_shift_key": 0,
+  "release_shift_key": 1,
+  "stop_sleeping": 2,
+  "start_sprinting": 3,
+  "stop_sprinting": 4,
+  "start_riding_jump": 5,
+  "stop_riding_jump": 6,
+  "open_inventory": 7,
+  "start_fall_flying": 8,
+});
 
-export const mapper2 = createEnumMapper(["successfully_loaded", "declined", "failed_download", "accepted"]);
+export const mapper2 = createEnumMapper({
+  "successfully_loaded": 0,
+  "declined": 1,
+  "failed_download": 2,
+  "accepted": 3,
+});
 
 export type CommandBlockMode = "sequence" | "auto" | "redstone";
 
-export const commandBlockModeEnum = createEnumMapper<CommandBlockMode>(["sequence", "auto", "redstone"]);
+export const commandBlockModeEnum = createEnumMapper<CommandBlockMode>({ "sequence": 0, "auto": 1, "redstone": 2 });
 
 export type JigsawBlockJointType = "rollable" | "aligned";
 
-export const jigsawBlockJointTypeEnum = createEnumMapper<JigsawBlockJointType>(["rollable", "aligned"]);
+export const jigsawBlockJointTypeEnum = createEnumMapper<JigsawBlockJointType>({ "rollable": 0, "aligned": 1 });
 
 export type StructureBlockUpdateType = "update_data" | "save_area" | "load_area" | "scan_area";
 
-export const structureBlockUpdateTypeEnum = createEnumMapper<StructureBlockUpdateType>(["update_data", "save_area", "load_area", "scan_area"]);
+export const structureBlockUpdateTypeEnum = createEnumMapper<StructureBlockUpdateType>({
+  "update_data": 0,
+  "save_area": 1,
+  "load_area": 2,
+  "scan_area": 3,
+});
 
 export type StructureMode = "save" | "load" | "corner" | "data";
 
-export const structureModeEnum = createEnumMapper<StructureMode>(["save", "load", "corner", "data"]);
+export const structureModeEnum = createEnumMapper<StructureMode>({ "save": 0, "load": 1, "corner": 2, "data": 3 });
 
 export type Mirror = "none" | "left_right" | "front_back";
 
-export const mirrorEnum = createEnumMapper<Mirror>(["none", "left_right", "front_back"]);
+export const mirrorEnum = createEnumMapper<Mirror>({ "none": 0, "left_right": 1, "front_back": 2 });
 
 export type Rotation = "none" | "clockwise_90" | "clockwise_180" | "counterclockwise_90";
 
-export const rotationEnum = createEnumMapper<Rotation>(["none", "clockwise_90", "clockwise_180", "counterclockwise_90"]);
+export const rotationEnum = createEnumMapper<Rotation>({
+  "none": 0,
+  "clockwise_90": 1,
+  "clockwise_180": 2,
+  "counterclockwise_90": 3,
+});
 
 export type BlockHitResult = {
   blockPos: BlockPos;
   direction: Direction;
-  /** Relative to the block position */
+  /** Position relative to the block's origin. */
   location: { x: number; y: number; z: number };
   inside: boolean;
 };
@@ -174,8 +175,8 @@ export class ServerboundAcceptTeleportationPacket implements Packet<ServerGameHa
   write(writer: Writer) {
     writer.writeVarInt(this.id);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleAcceptTeleportation?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleAcceptTeleportation?.(this);
   }
 }
 
@@ -193,8 +194,8 @@ export class ServerboundBlockEntityTagQueryPacket implements Packet<ServerGameHa
     writer.writeVarInt(this.transactionId);
     writeBlockPos(writer, this.pos);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleBlockEntityTagQuery?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleBlockEntityTagQuery?.(this);
   }
 }
 
@@ -209,8 +210,8 @@ export class ServerboundChangeDifficultyPacket implements Packet<ServerGameHandl
   write(writer: Writer) {
     writer.writeUnsignedByte(this.difficulty);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleChangeDifficulty?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleChangeDifficulty?.(this);
   }
 }
 
@@ -225,8 +226,8 @@ export class ServerboundChatAckPacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writeLastSeenMessagesUpdate(writer, this.lastSeenMessages);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleChatAck?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleChatAck?.(this);
   }
 }
 
@@ -256,8 +257,8 @@ export class ServerboundChatCommandPacket implements Packet<ServerGameHandler> {
     writer.writeBoolean(this.signedPreview);
     writeLastSeenMessagesUpdate(writer, this.lastSeenMessages);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleChatCommand?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleChatCommand?.(this);
   }
 }
 
@@ -287,27 +288,27 @@ export class ServerboundChatPacket implements Packet<ServerGameHandler> {
     writer.writeBoolean(this.signedPreview);
     writeLastSeenMessagesUpdate(writer, this.lastSeenMessages);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleChat?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleChat?.(this);
   }
 }
 
 export class ServerboundChatPreviewPacket implements Packet<ServerGameHandler> {
   constructor(
-    public queryId: number,
-    public query: string,
+    public transactionId: number,
+    public message: string,
   ) {}
   static read(reader: Reader) {
-    const queryId = reader.readInt();
-    const query = reader.readString(256);
-    return new this(queryId, query);
+    const transactionId = reader.readInt();
+    const message = reader.readString(256);
+    return new this(transactionId, message);
   }
   write(writer: Writer) {
-    writer.writeInt(this.queryId);
-    writer.writeString(this.query);
+    writer.writeInt(this.transactionId);
+    writer.writeString(this.message);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleChatPreview?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleChatPreview?.(this);
   }
 }
 
@@ -322,8 +323,8 @@ export class ServerboundClientCommandPacket implements Packet<ServerGameHandler>
   write(writer: Writer) {
     writer.writeVarInt(clientCommandActionEnum.toId(this.action));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleClientCommand?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleClientCommand?.(this);
   }
 }
 
@@ -341,45 +342,54 @@ export class ServerboundClientInformationPacket implements Packet<ServerGameHand
   static read(reader: Reader) {
     const language = reader.readString(16);
     const viewDistance = reader.readByte();
-    const chatVisibility = readChatVisiblity(reader);
+    const chatVisibility = chatVisiblityEnum.fromId(reader.readVarInt());
     const chatColors = reader.readBoolean();
     const modelCustomisation = reader.readByte();
-    const mainHand = readHumanoidArm(reader);
+    const mainHand = humanoidArmEnum.fromId(reader.readVarInt());
     const textFilteringEnabled = reader.readBoolean();
     const allowsListing = reader.readBoolean();
-    return new this(language, viewDistance, chatVisibility, chatColors, modelCustomisation, mainHand, textFilteringEnabled, allowsListing);
+    return new this(
+      language,
+      viewDistance,
+      chatVisibility,
+      chatColors,
+      modelCustomisation,
+      mainHand,
+      textFilteringEnabled,
+      allowsListing,
+    );
   }
   write(writer: Writer) {
     writer.writeString(this.language);
     writer.writeByte(this.viewDistance);
-    writeChatVisiblity(writer, this.chatVisibility);
+    writer.writeVarInt(chatVisiblityEnum.toId(this.chatVisibility));
     writer.writeBoolean(this.chatColors);
     writer.writeByte(this.modelCustomisation);
-    writeHumanoidArm(writer, this.mainHand);
+    writer.writeVarInt(humanoidArmEnum.toId(this.mainHand));
     writer.writeBoolean(this.textFilteringEnabled);
     writer.writeBoolean(this.allowsListing);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleClientInformation?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleClientInformation?.(this);
   }
 }
 
 export class ServerboundCommandSuggestionPacket implements Packet<ServerGameHandler> {
   constructor(
-    public id: number,
+    public transactionId: number,
     public command: string,
   ) {}
   static read(reader: Reader) {
-    const id = reader.readVarInt();
+    const transactionId = reader.readVarInt();
     const command = reader.readString(32500);
-    return new this(id, command);
+    return new this(transactionId, command);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.id);
+    writer.writeVarInt(this.transactionId);
     writer.writeString(this.command);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleCommandSuggestion?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleCommandSuggestion?.(this);
   }
 }
 
@@ -397,8 +407,8 @@ export class ServerboundContainerButtonClickPacket implements Packet<ServerGameH
     writer.writeByte(this.containerId);
     writer.writeByte(this.buttonId);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleContainerButtonClick?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleContainerButtonClick?.(this);
   }
 }
 
@@ -417,7 +427,7 @@ export class ServerboundContainerClickPacket implements Packet<ServerGameHandler
     const stateId = reader.readVarInt();
     const slotNum = reader.readShort();
     const buttonNum = reader.readByte();
-    const clickType = readClickType(reader);
+    const clickType = clickTypeEnum.fromId(reader.readVarInt());
     const map: Map<number, ItemStack> = new Map();
     for (let i = reader.readVarInt(); i--;) {
       const key = reader.readShort();
@@ -433,7 +443,7 @@ export class ServerboundContainerClickPacket implements Packet<ServerGameHandler
     writer.writeVarInt(this.stateId);
     writer.writeShort(this.slotNum);
     writer.writeByte(this.buttonNum);
-    writeClickType(writer, this.clickType);
+    writer.writeVarInt(clickTypeEnum.toId(this.clickType));
     writer.writeVarInt(this.changedSlots.size);
     for (const [key, value] of this.changedSlots) {
       writer.writeShort(key);
@@ -441,8 +451,8 @@ export class ServerboundContainerClickPacket implements Packet<ServerGameHandler
     }
     writeItemStack(writer, this.carriedItem);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleContainerClick?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleContainerClick?.(this);
   }
 }
 
@@ -457,8 +467,8 @@ export class ServerboundContainerClosePacket implements Packet<ServerGameHandler
   write(writer: Writer) {
     writer.writeByte(this.containerId);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleContainerClose?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleContainerClose?.(this);
   }
 }
 
@@ -476,8 +486,8 @@ export class ServerboundCustomPayloadPacket implements Packet<ServerGameHandler>
     writeResourceLocation(writer, this.identifier);
     writer.write(this.data);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleCustomPayload?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleCustomPayload?.(this);
   }
 }
 
@@ -502,8 +512,8 @@ export class ServerboundEditBookPacket implements Packet<ServerGameHandler> {
     writer.writeBoolean(this.title != null);
     if (this.title != null) writer.writeString(this.title);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleEditBook?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleEditBook?.(this);
   }
 }
 
@@ -521,8 +531,8 @@ export class ServerboundEntityTagQueryPacket implements Packet<ServerGameHandler
     writer.writeVarInt(this.transactionId);
     writer.writeVarInt(this.entityId);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleEntityTagQuery?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleEntityTagQuery?.(this);
   }
 }
 
@@ -543,13 +553,17 @@ export class ServerboundInteractPacket implements Packet<ServerGameHandler> {
       | { type: "interact_at"; location: { x: number; y: number; z: number }; hand: InteractionHand };
     switch (reader.readVarInt()) {
       case 0:
-        result = { type: "interact", hand: readInteractionHand(reader) };
+        result = { type: "interact", hand: interactionHandEnum.fromId(reader.readVarInt()) };
         break;
       case 1:
         result = { type: "attack" };
         break;
       case 2:
-        result = { type: "interact_at", location: { x: reader.readFloat(), y: reader.readFloat(), z: reader.readFloat() }, hand: readInteractionHand(reader) };
+        result = {
+          type: "interact_at",
+          location: { x: reader.readFloat(), y: reader.readFloat(), z: reader.readFloat() },
+          hand: interactionHandEnum.fromId(reader.readVarInt()),
+        };
         break;
       default:
         throw new Error("Invalid tag id");
@@ -563,7 +577,7 @@ export class ServerboundInteractPacket implements Packet<ServerGameHandler> {
     switch (this.action.type) {
       case "interact": {
         writer.writeVarInt(0);
-        writeInteractionHand(writer, this.action.hand);
+        writer.writeVarInt(interactionHandEnum.toId(this.action.hand));
         break;
       }
       case "attack": {
@@ -575,7 +589,7 @@ export class ServerboundInteractPacket implements Packet<ServerGameHandler> {
         writer.writeFloat(this.action.location.x);
         writer.writeFloat(this.action.location.y);
         writer.writeFloat(this.action.location.z);
-        writeInteractionHand(writer, this.action.hand);
+        writer.writeVarInt(interactionHandEnum.toId(this.action.hand));
         break;
       }
       default:
@@ -583,8 +597,8 @@ export class ServerboundInteractPacket implements Packet<ServerGameHandler> {
     }
     writer.writeBoolean(this.usingSecondaryAction);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleInteract?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleInteract?.(this);
   }
 }
 
@@ -605,8 +619,8 @@ export class ServerboundJigsawGeneratePacket implements Packet<ServerGameHandler
     writer.writeVarInt(this.levels);
     writer.writeBoolean(this.keepJigsaws);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleJigsawGenerate?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleJigsawGenerate?.(this);
   }
 }
 
@@ -621,8 +635,8 @@ export class ServerboundKeepAlivePacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writer.writeLong(this.id);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleKeepAlive?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleKeepAlive?.(this);
   }
 }
 
@@ -637,8 +651,8 @@ export class ServerboundLockDifficultyPacket implements Packet<ServerGameHandler
   write(writer: Writer) {
     writer.writeBoolean(this.locked);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleLockDifficulty?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleLockDifficulty?.(this);
   }
 }
 
@@ -662,8 +676,8 @@ export class ServerboundMovePlayerPosPacket implements Packet<ServerGameHandler>
     writer.writeDouble(this.z);
     writer.writeBoolean(this.onGround);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleMovePlayerPos?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleMovePlayerPos?.(this);
   }
 }
 
@@ -693,8 +707,8 @@ export class ServerboundMovePlayerPosRotPacket implements Packet<ServerGameHandl
     writer.writeFloat(this.xRot);
     writer.writeBoolean(this.onGround);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleMovePlayerPosRot?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleMovePlayerPosRot?.(this);
   }
 }
 
@@ -715,8 +729,8 @@ export class ServerboundMovePlayerRotPacket implements Packet<ServerGameHandler>
     writer.writeFloat(this.xRot);
     writer.writeBoolean(this.onGround);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleMovePlayerRot?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleMovePlayerRot?.(this);
   }
 }
 
@@ -731,8 +745,8 @@ export class ServerboundMovePlayerStatusOnlyPacket implements Packet<ServerGameH
   write(writer: Writer) {
     writer.writeBoolean(this.onGround);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleMovePlayerStatusOnly?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleMovePlayerStatusOnly?.(this);
   }
 }
 
@@ -759,8 +773,8 @@ export class ServerboundMoveVehiclePacket implements Packet<ServerGameHandler> {
     writer.writeFloat(this.yRot);
     writer.writeFloat(this.xRot);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleMoveVehicle?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleMoveVehicle?.(this);
   }
 }
 
@@ -778,8 +792,8 @@ export class ServerboundPaddleBoatPacket implements Packet<ServerGameHandler> {
     writer.writeBoolean(this.left);
     writer.writeBoolean(this.right);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePaddleBoat?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePaddleBoat?.(this);
   }
 }
 
@@ -794,8 +808,8 @@ export class ServerboundPickItemPacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writer.writeVarInt(this.slot);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePickItem?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePickItem?.(this);
   }
 }
 
@@ -816,8 +830,8 @@ export class ServerboundPlaceRecipePacket implements Packet<ServerGameHandler> {
     writeResourceLocation(writer, this.recipe);
     writer.writeBoolean(this.shiftDown);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePlaceRecipe?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePlaceRecipe?.(this);
   }
 }
 
@@ -833,8 +847,8 @@ export class ServerboundPlayerAbilitiesPacket implements Packet<ServerGameHandle
   write(writer: Writer) {
     writer.writeByte(-this.flags.isFlying & 0x2);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePlayerAbilities?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePlayerAbilities?.(this);
   }
 }
 
@@ -846,27 +860,36 @@ export class ServerboundPlayerActionPacket implements Packet<ServerGameHandler> 
     public sequence: number,
   ) {}
   static read(reader: Reader) {
-    const action = readPlayerAction(reader);
+    const action = playerActionEnum.fromId(reader.readVarInt());
     const pos = readBlockPos(reader);
-    const direction = readDirection(reader);
+    const direction = directionEnum.fromId(reader.readVarInt());
     const sequence = reader.readVarInt();
     return new this(action, pos, direction, sequence);
   }
   write(writer: Writer) {
-    writePlayerAction(writer, this.action);
+    writer.writeVarInt(playerActionEnum.toId(this.action));
     writeBlockPos(writer, this.pos);
-    writeDirection(writer, this.direction);
+    writer.writeVarInt(directionEnum.toId(this.direction));
     writer.writeVarInt(this.sequence);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePlayerAction?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePlayerAction?.(this);
   }
 }
 
 export class ServerboundPlayerCommandPacket implements Packet<ServerGameHandler> {
   constructor(
     public id: number,
-    public action: "press_shift_key" | "release_shift_key" | "stop_sleeping" | "start_sprinting" | "stop_sprinting" | "start_riding_jump" | "stop_riding_jump" | "open_inventory" | "start_fall_flying",
+    public action:
+      | "press_shift_key"
+      | "release_shift_key"
+      | "stop_sleeping"
+      | "start_sprinting"
+      | "stop_sprinting"
+      | "start_riding_jump"
+      | "stop_riding_jump"
+      | "open_inventory"
+      | "start_fall_flying",
     public data: number,
   ) {}
   static read(reader: Reader) {
@@ -880,8 +903,8 @@ export class ServerboundPlayerCommandPacket implements Packet<ServerGameHandler>
     writer.writeVarInt(mapper1.toId(this.action));
     writer.writeVarInt(this.data);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePlayerCommand?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePlayerCommand?.(this);
   }
 }
 
@@ -903,8 +926,8 @@ export class ServerboundPlayerInputPacket implements Packet<ServerGameHandler> {
     writer.writeFloat(this.zza);
     writer.writeByte((-this.fields.isJumping & 0x1) | (-this.fields.isShiftKeyDown & 0x2));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePlayerInput?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePlayerInput?.(this);
   }
 }
 
@@ -919,8 +942,8 @@ export class ServerboundPongPacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writer.writeInt(this.id);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handlePong?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handlePong?.(this);
   }
 }
 
@@ -931,18 +954,18 @@ export class ServerboundRecipeBookChangeSettingsPacket implements Packet<ServerG
     public isFiltering: boolean,
   ) {}
   static read(reader: Reader) {
-    const bookType = readRecipeBookType(reader);
+    const bookType = recipeBookTypeEnum.fromId(reader.readVarInt());
     const isOpen = reader.readBoolean();
     const isFiltering = reader.readBoolean();
     return new this(bookType, isOpen, isFiltering);
   }
   write(writer: Writer) {
-    writeRecipeBookType(writer, this.bookType);
+    writer.writeVarInt(recipeBookTypeEnum.toId(this.bookType));
     writer.writeBoolean(this.isOpen);
     writer.writeBoolean(this.isFiltering);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleRecipeBookChangeSettings?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleRecipeBookChangeSettings?.(this);
   }
 }
 
@@ -957,8 +980,8 @@ export class ServerboundRecipeBookSeenRecipePacket implements Packet<ServerGameH
   write(writer: Writer) {
     writeResourceLocation(writer, this.recipe);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleRecipeBookSeenRecipe?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleRecipeBookSeenRecipe?.(this);
   }
 }
 
@@ -973,8 +996,8 @@ export class ServerboundRenameItemPacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writer.writeString(this.name);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleRenameItem?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleRenameItem?.(this);
   }
 }
 
@@ -989,8 +1012,8 @@ export class ServerboundResourcePackPacket implements Packet<ServerGameHandler> 
   write(writer: Writer) {
     writer.writeVarInt(mapper2.toId(this.action));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleResourcePack?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleResourcePack?.(this);
   }
 }
 
@@ -1032,8 +1055,8 @@ export class ServerboundSeenAdvancementsPacket implements Packet<ServerGameHandl
         throw new Error("Invalid tag");
     }
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSeenAdvancements?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSeenAdvancements?.(this);
   }
 }
 
@@ -1048,8 +1071,8 @@ export class ServerboundSelectTradePacket implements Packet<ServerGameHandler> {
   write(writer: Writer) {
     writer.writeVarInt(this.item);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSelectTrade?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSelectTrade?.(this);
   }
 }
 
@@ -1059,18 +1082,18 @@ export class ServerboundSetBeaconPacket implements Packet<ServerGameHandler> {
     public secondary: MobEffect | null,
   ) {}
   static read(reader: Reader) {
-    const primary = reader.readBoolean() ? readMobEffect(reader) : null;
-    const secondary = reader.readBoolean() ? readMobEffect(reader) : null;
+    const primary = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
+    const secondary = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
     return new this(primary, secondary);
   }
   write(writer: Writer) {
     writer.writeBoolean(this.primary != null);
-    if (this.primary != null) writeMobEffect(writer, this.primary);
+    if (this.primary != null) writer.writeVarInt(mobEffectEnum.toId(this.primary));
     writer.writeBoolean(this.secondary != null);
-    if (this.secondary != null) writeMobEffect(writer, this.secondary);
+    if (this.secondary != null) writer.writeVarInt(mobEffectEnum.toId(this.secondary));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetBeacon?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetBeacon?.(this);
   }
 }
 
@@ -1085,8 +1108,8 @@ export class ServerboundSetCarriedItemPacket implements Packet<ServerGameHandler
   write(writer: Writer) {
     writer.writeShort(this.slot);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetCarriedItem?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetCarriedItem?.(this);
   }
 }
 
@@ -1109,10 +1132,12 @@ export class ServerboundSetCommandBlockPacket implements Packet<ServerGameHandle
     writeBlockPos(writer, this.pos);
     writer.writeString(this.command);
     writer.writeVarInt(commandBlockModeEnum.toId(this.mode));
-    writer.writeByte((-this.fields.trackOutput & 0x1) | (-this.fields.conditional & 0x2) | (-this.fields.automatic & 0x4));
+    writer.writeByte(
+      (-this.fields.trackOutput & 0x1) | (-this.fields.conditional & 0x2) | (-this.fields.automatic & 0x4),
+    );
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetCommandBlock?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetCommandBlock?.(this);
   }
 }
 
@@ -1133,8 +1158,8 @@ export class ServerboundSetCommandMinecartPacket implements Packet<ServerGameHan
     writer.writeString(this.command);
     writer.writeBoolean(this.trackOutput);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetCommandMinecart?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetCommandMinecart?.(this);
   }
 }
 
@@ -1152,8 +1177,8 @@ export class ServerboundSetCreativeModeSlotPacket implements Packet<ServerGameHa
     writer.writeShort(this.slotNum);
     writeItemStack(writer, this.itemStack);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetCreativeModeSlot?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetCreativeModeSlot?.(this);
   }
 }
 
@@ -1183,8 +1208,8 @@ export class ServerboundSetJigsawBlockPacket implements Packet<ServerGameHandler
     writer.writeString(this.finalState);
     writer.writeVarInt(jigsawBlockJointTypeEnum.toId(this.joint));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetJigsawBlock?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetJigsawBlock?.(this);
   }
 }
 
@@ -1216,7 +1241,11 @@ export class ServerboundSetStructureBlockPacket implements Packet<ServerGameHand
     const integrity = reader.readFloat();
     const seed = reader.readVarLong();
     const flags1 = reader.readByte();
-    const flags = { ignoreEntities: (flags1 & 0x1) > 0, showAir: (flags1 & 0x2) > 0, showBoundingBox: (flags1 & 0x4) > 0 };
+    const flags = {
+      ignoreEntities: (flags1 & 0x1) > 0,
+      showAir: (flags1 & 0x2) > 0,
+      showBoundingBox: (flags1 & 0x4) > 0,
+    };
     return new this(pos, updateType, mode, name, offset, size, mirror, rotation, data, integrity, seed, flags);
   }
   write(writer: Writer) {
@@ -1235,10 +1264,12 @@ export class ServerboundSetStructureBlockPacket implements Packet<ServerGameHand
     writer.writeString(this.data);
     writer.writeFloat(this.integrity);
     writer.writeVarLong(this.seed);
-    writer.writeByte((-this.flags.ignoreEntities & 0x1) | (-this.flags.showAir & 0x2) | (-this.flags.showBoundingBox & 0x4));
+    writer.writeByte(
+      (-this.flags.ignoreEntities & 0x1) | (-this.flags.showAir & 0x2) | (-this.flags.showBoundingBox & 0x4),
+    );
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSetStructureBlock?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSetStructureBlock?.(this);
   }
 }
 
@@ -1258,8 +1289,8 @@ export class ServerboundSignUpdatePacket implements Packet<ServerGameHandler> {
     writeBlockPos(writer, this.pos);
     for (const item of this.lines) writer.writeString(item);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSignUpdate?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSignUpdate?.(this);
   }
 }
 
@@ -1268,14 +1299,14 @@ export class ServerboundSwingPacket implements Packet<ServerGameHandler> {
     public hand: InteractionHand,
   ) {}
   static read(reader: Reader) {
-    const hand = readInteractionHand(reader);
+    const hand = interactionHandEnum.fromId(reader.readVarInt());
     return new this(hand);
   }
   write(writer: Writer) {
-    writeInteractionHand(writer, this.hand);
+    writer.writeVarInt(interactionHandEnum.toId(this.hand));
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleSwing?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleSwing?.(this);
   }
 }
 
@@ -1290,8 +1321,8 @@ export class ServerboundTeleportToEntityPacket implements Packet<ServerGameHandl
   write(writer: Writer) {
     writer.writeUuid(this.uuid);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleTeleportToEntity?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleTeleportToEntity?.(this);
   }
 }
 
@@ -1302,10 +1333,10 @@ export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
     public sequence: number,
   ) {}
   static read(reader: Reader) {
-    const hand = readInteractionHand(reader);
+    const hand = interactionHandEnum.fromId(reader.readVarInt());
     const blockHit = {
       blockPos: readBlockPos(reader),
-      direction: readDirection(reader),
+      direction: directionEnum.fromId(reader.readVarInt()),
       location: { x: reader.readFloat(), y: reader.readFloat(), z: reader.readFloat() },
       inside: reader.readBoolean(),
     };
@@ -1313,17 +1344,17 @@ export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
     return new this(hand, blockHit, sequence);
   }
   write(writer: Writer) {
-    writeInteractionHand(writer, this.hand);
+    writer.writeVarInt(interactionHandEnum.toId(this.hand));
     writeBlockPos(writer, this.blockHit.blockPos);
-    writeDirection(writer, this.blockHit.direction);
+    writer.writeVarInt(directionEnum.toId(this.blockHit.direction));
     writer.writeFloat(this.blockHit.location.x);
     writer.writeFloat(this.blockHit.location.y);
     writer.writeFloat(this.blockHit.location.z);
     writer.writeBoolean(this.blockHit.inside);
     writer.writeVarInt(this.sequence);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleUseItemOn?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleUseItemOn?.(this);
   }
 }
 
@@ -1333,15 +1364,15 @@ export class ServerboundUseItemPacket implements Packet<ServerGameHandler> {
     public sequence: number,
   ) {}
   static read(reader: Reader) {
-    const hand = readInteractionHand(reader);
+    const hand = interactionHandEnum.fromId(reader.readVarInt());
     const sequence = reader.readVarInt();
     return new this(hand, sequence);
   }
   write(writer: Writer) {
-    writeInteractionHand(writer, this.hand);
+    writer.writeVarInt(interactionHandEnum.toId(this.hand));
     writer.writeVarInt(this.sequence);
   }
-  handle(handler: ServerGameHandler) {
-    return handler.handleUseItem?.(this);
+  async handle(handler: ServerGameHandler) {
+    await handler.handleUseItem?.(this);
   }
 }

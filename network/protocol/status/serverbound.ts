@@ -14,8 +14,8 @@ export class ServerboundStatusRequestPacket implements Packet<ServerStatusHandle
   }
   write(writer: Writer) {
   }
-  handle(handler: ServerStatusHandler) {
-    return handler.handleStatusRequest?.(this);
+  async handle(handler: ServerStatusHandler) {
+    await handler.handleStatusRequest?.(this);
   }
 }
 
@@ -30,7 +30,7 @@ export class ServerboundPingRequestPacket implements Packet<ServerStatusHandler>
   write(writer: Writer) {
     writer.writeLong(this.time);
   }
-  handle(handler: ServerStatusHandler) {
-    return handler.handlePingRequest?.(this);
+  async handle(handler: ServerStatusHandler) {
+    await handler.handlePingRequest?.(this);
   }
 }

@@ -1,7 +1,7 @@
 import { flow, packet, protocol } from "../protocol.ts";
 import { Json, Long } from "../types.ts";
 
-protocol("status", 1);
+protocol("status");
 
 flow("serverbound");
 

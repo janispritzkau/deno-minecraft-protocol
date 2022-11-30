@@ -15,9 +15,8 @@ import {
   StructType,
   TaggedUnionType,
   Type,
-  TypeContext,
-  Variable,
 } from "./type.ts";
+import { TypeContext, Variable } from "./type_context.ts";
 
 export const Byte = new NativeType("Byte", "number");
 export const UnsignedByte = new NativeType("UnsignedByte", "number");
@@ -69,7 +68,12 @@ export const List = (item: Type, length?: number | Type) => {
 export const Struct = (fields: Record<string, Type>) => new StructType(fields);
 export const Merge = (...structs: StructType[]) => new MergeStructsType(...structs);
 export const Map = (key: Type, value: Type) => new MapType(key, value, VarInt);
-export const Enum = (variants: string[], value?: Type) => new EnumType(value ?? VarInt, variants);
+export const Enum = (variants: string[] | Record<string, number>, value?: Type) => {
+  return new EnumType(
+    value ?? VarInt,
+    variants instanceof Array ? Object.fromEntries(variants.map((key, id) => [key, id])) : variants,
+  );
+};
 
 export const TaggedUnion = (
   tag: string,

@@ -20,8 +20,8 @@ export class ClientboundStatusResponsePacket implements Packet<ClientStatusHandl
   write(writer: Writer) {
     writer.writeJson(this.status);
   }
-  handle(handler: ClientStatusHandler) {
-    return handler.handleStatusResponse?.(this);
+  async handle(handler: ClientStatusHandler) {
+    await handler.handleStatusResponse?.(this);
   }
 }
 
@@ -36,7 +36,7 @@ export class ClientboundPongResponsePacket implements Packet<ClientStatusHandler
   write(writer: Writer) {
     writer.writeLong(this.time);
   }
-  handle(handler: ClientStatusHandler) {
-    return handler.handlePongResponse?.(this);
+  async handle(handler: ClientStatusHandler) {
+    await handler.handlePongResponse?.(this);
   }
 }

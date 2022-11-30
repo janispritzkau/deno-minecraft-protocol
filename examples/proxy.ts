@@ -129,10 +129,10 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
     clientHandler = handler;
   };
 
-  if (handshake.intention == 1) {
+  if (handshake.intention == "status") {
     setServerProtocol(statusProtocol);
     setClientProtocol(statusProtocol);
-  } else if (handshake.intention == 2) {
+  } else if (handshake.intention == "login") {
     setServerProtocol(loginProtocol);
 
     setClientProtocol(loginProtocol, {

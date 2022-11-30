@@ -1,22 +1,15 @@
 import * as path from "https://deno.land/std@0.166.0/path/mod.ts";
 import * as fs from "https://deno.land/std@0.166.0/fs/mod.ts";
 
-import {
-  createTypeContext,
-  DocumentedType,
-  ExportedType,
-  Type,
-  TypeContext,
-  Variable,
-} from "./type.ts";
-import { format } from "./utils.ts";
+import { createTypeContext, TypeContext, Variable } from "./type_context.ts";
+import { DocumentedType, ExportedType, Type } from "./type.ts";
+import { format, formatDocComment } from "./utils.ts";
 
 export type Flow = "serverbound" | "clientbound";
 
-export interface Protocol {
-  name: string;
-  version: number;
-  packets: Record<Flow, Packet[]>;
+export interface PacketMethod {
+  declaration: string;
+  body: string;
 }
 
 export interface Packet {
@@ -24,15 +17,24 @@ export interface Packet {
   flow: Flow;
   id: number;
   name: string;
+  description: string | null;
   fields: Record<string, Type>;
+  methods: PacketMethod[];
   reader?: (context: TypeContext) => Variable[];
   writer?: (context: TypeContext) => void;
+  method(declaration: string, body: string): Packet;
+  doc(description: string): Packet;
 }
 
-export const types = new Map<string, ExportedType>();
-export const protocols = new Map<string, Protocol>();
-export let currentProtocol: Protocol | null = null;
-export let currentFlow: Flow | null = null;
+interface Protocol {
+  name: string;
+  packets: Record<Flow, Packet[]>;
+}
+
+const types = new Map<string, ExportedType>();
+const protocols = new Map<string, Protocol>();
+let currentProtocol: Protocol | null = null;
+let currentFlow: Flow | null = null;
 
 /** Exports and returns an aliased type. */
 export function type(name: string, type: Type): ExportedType;
@@ -52,26 +54,13 @@ export function type(name: string, type?: Type): unknown {
   return (type: Type) => defineType(type);
 }
 
-/** Returns a documented type. If and where the doc comment appears depends on where it is being used. */
-export function doc(type: Type, description: string): Type {
-  if (type instanceof DocumentedType) {
-    throw new Error("Type is already documented");
-  }
-
-  return new DocumentedType(description, type);
-}
-
 /** Defines a new protocol and uses it in subsequent calls to the {@linkcode packet} function. */
-export function protocol(name: string, version: number): void {
-  // if (version == null) {
-  //   if (!protocols.has(name)) throw new Error(`Protocol `)
-  // }
-
+export function protocol(name: string): void {
   if (protocols.has(name)) {
     throw new Error(`Protocol '${name}' is already defined`);
   }
 
-  currentProtocol = { name, version, packets: { clientbound: [], serverbound: [] } };
+  currentProtocol = { name, packets: { clientbound: [], serverbound: [] } };
   protocols.set(name, currentProtocol);
 }
 
@@ -81,33 +70,46 @@ export function flow(flow: Flow): void {
 }
 
 /** Defines a packet using the current protocol and packet flow. */
-export function packet(name: string, fields: Record<string, Type>): void;
+export function packet(name: string, fields: Record<string, Type>): Packet;
 export function packet(
   name: string,
   fields: Record<string, Type>,
   reader: (context: TypeContext) => Variable[],
   writer: (context: TypeContext) => void,
-): void;
+): Packet;
 export function packet(
   name: string,
   fields: Record<string, Type>,
   reader?: (context: TypeContext) => Variable[],
   writer?: (context: TypeContext) => void,
-): void {
+): Packet {
   if (!currentProtocol) throw new Error("Must first call protocol()");
   if (!currentFlow) throw new Error("Must first call flow()");
 
   const packets = currentProtocol.packets[currentFlow];
 
-  packets.push({
+  const packet: Packet = {
     protocol: currentProtocol.name,
     flow: currentFlow,
     id: packets.length,
     name,
+    description: null,
     fields,
+    methods: [],
     reader,
     writer,
-  });
+    method(declaration, body) {
+      packet.methods.push({ declaration, body });
+      return packet;
+    },
+    doc(description) {
+      packet.description = description;
+      return packet;
+    },
+  };
+
+  packets.push(packet);
+  return packet;
 }
 
 /** Generates the modules for all types and protocols. */
@@ -130,14 +132,14 @@ export async function generate(outputPath: string): Promise<void> {
 
   const context = createTypeContext({
     defineGlobal(init, name) {
-      moduleInit += "\nexport " + init + "\n";
+      moduleInit += "export " + init + "\n\n";
       symbols.add(name);
     },
     defineConstant(name, expression) {
       let suffix = 0;
       while (symbols.has(name + (suffix || ""))) suffix++;
       name += suffix || "";
-      moduleInit += `\nexport const ${name} = ${expression};\n`;
+      moduleInit += `export const ${name} = ${expression};\n\n`;
       symbols.add(name);
       return name;
     },
@@ -150,7 +152,7 @@ export async function generate(outputPath: string): Promise<void> {
     type.init(context, true);
   }
 
-  await output("types.ts", moduleInit);
+  await output("types.ts", moduleInit.trimEnd() + "\n");
 
   const typesSymbols = new Set(symbols);
 
@@ -184,9 +186,8 @@ export async function generate(outputPath: string): Promise<void> {
         }
       }
 
-      let moduleCode = "";
       const handler = flowShort + protocolName + "Handler";
-      moduleCode += "\n";
+      let moduleCode = "";
       moduleCode += `export interface ${handler} extends PacketHandler {\n`;
       for (const packet of protocol.packets[flow]) {
         moduleCode += `handle${
@@ -196,6 +197,7 @@ export async function generate(outputPath: string): Promise<void> {
       moduleCode += `}\n\n`;
 
       for (const packet of protocol.packets[flow]) {
+        if (packet.description) moduleCode += formatDocComment(packet.description);
         moduleCode += `export class ${packet.name} implements Packet<${handler}> {\n`;
 
         moduleCode += `constructor(\n`;
@@ -213,7 +215,7 @@ export async function generate(outputPath: string): Promise<void> {
             });
           }
           return Object.entries(packet.fields).map(([name, type]) => {
-            const variable = context.declare(name, () => type.reader(context));
+            const variable = context.declare(name, () => type.read(context));
             variable.use();
             return variable;
           });
@@ -228,15 +230,19 @@ export async function generate(outputPath: string): Promise<void> {
           moduleCode += context.capture(() => writer(context)).statementBlock;
         } else {
           for (const [name, type] of Object.entries(packet.fields)) {
-            const capture = context.capture(() => type.writer(context, `this.${name}`));
+            const capture = context.capture(() => type.write(context, `this.${name}`));
             moduleCode += capture.statementBlock;
           }
         }
         moduleCode += `}\n`;
 
-        moduleCode += `handle(handler: ${handler}) {\nreturn handler.handle${
+        moduleCode += `async handle(handler: ${handler}) {\nawait handler.handle${
           packet.name.replace(/^(?:Client|Server)(?:bound)?(\w+)Packet$/, "$1")
         }?.(this);\n}\n`;
+
+        for (const method of packet.methods) {
+          moduleCode += `${method.declaration} {\n${method.body.trimEnd()}\n}\n`;
+        }
 
         moduleCode += `}\n\n`;
       }
@@ -254,7 +260,7 @@ export async function generate(outputPath: string): Promise<void> {
 
       await output(
         `${protocol.name}/${flow}.ts`,
-        moduleImports + "\n" + moduleInit + "\n" + moduleCode,
+        moduleImports + "\n" + moduleInit + moduleCode.trimEnd() + "\n",
       );
     }
 
@@ -269,26 +275,27 @@ export async function generate(outputPath: string): Promise<void> {
     }
     moduleCode += "\n";
 
-    moduleCode += `export class ${protocolName}Protocol extends Protocol<${
-      allFlows.map(([flow, flowShort]) =>
-        protocol.packets[flow].length > 0 ? `${flowShort}${protocolName}Handler` : "void"
-      )
-    }> {\nconstructor() {\nsuper();\n`;
+    moduleCode +=
+      `export const ${protocol.name}Protocol = new class ${protocolName}Protocol extends Protocol<${
+        allFlows.map(([flow, flowShort]) =>
+          protocol.packets[flow].length > 0 ? `${flowShort}${protocolName}Handler` : "void"
+        )
+      }> {\nconstructor() {\nsuper();\n`;
     for (const [flow] of flows) {
       for (const packet of protocol.packets[flow]) {
-        moduleCode += `this.register${
-          flow.replace(/^./, (c) => c.toUpperCase())
-        }(${packet.id}, ${packet.name});\n`;
+        moduleCode += `this.register${flow.replace(/^./, (c) => c.toUpperCase())}(0x${
+          packet.id.toString(16).padStart(2, "0")
+        }, ${packet.name});\n`;
       }
     }
-    moduleCode += "}\n}\n\n";
-    moduleCode += `export const ${protocol.name}Protocol = new ${protocolName}Protocol();\n\n`;
+    moduleCode += "}\n};\n\n";
+
     for (const [flow] of flows) moduleCode += `export * from "./${flow}.ts"\n`;
 
     await output(`${protocol.name}/mod.ts`, moduleCode);
   }
 
-  let moduleCode = "";
+  let moduleCode = `export * from "./types.ts";\n`;
   for (const protocol of protocols.values()) {
     moduleCode += `export * from "./${protocol.name}/mod.ts";\n`;
   }

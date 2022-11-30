@@ -1,6 +1,11 @@
 // deno-lint-ignore-file
 import { Protocol } from "minecraft/network/protocol.ts";
-import { ServerboundCustomQueryPacket, ServerboundHelloPacket, ServerboundKeyPacket, ServerLoginHandler } from "./serverbound.ts";
+import {
+  ServerboundCustomQueryPacket,
+  ServerboundHelloPacket,
+  ServerboundKeyPacket,
+  ServerLoginHandler,
+} from "./serverbound.ts";
 import {
   ClientboundCustomQueryPacket,
   ClientboundGameProfilePacket,
@@ -10,21 +15,19 @@ import {
   ClientLoginHandler,
 } from "./clientbound.ts";
 
-export class LoginProtocol extends Protocol<ServerLoginHandler, ClientLoginHandler> {
+export const loginProtocol = new class LoginProtocol extends Protocol<ServerLoginHandler, ClientLoginHandler> {
   constructor() {
     super();
-    this.registerServerbound(0, ServerboundHelloPacket);
-    this.registerServerbound(1, ServerboundKeyPacket);
-    this.registerServerbound(2, ServerboundCustomQueryPacket);
-    this.registerClientbound(0, ClientboundLoginDisconnectPacket);
-    this.registerClientbound(1, ClientboundHelloPacket);
-    this.registerClientbound(2, ClientboundGameProfilePacket);
-    this.registerClientbound(3, ClientboundLoginCompressionPacket);
-    this.registerClientbound(4, ClientboundCustomQueryPacket);
+    this.registerServerbound(0x00, ServerboundHelloPacket);
+    this.registerServerbound(0x01, ServerboundKeyPacket);
+    this.registerServerbound(0x02, ServerboundCustomQueryPacket);
+    this.registerClientbound(0x00, ClientboundLoginDisconnectPacket);
+    this.registerClientbound(0x01, ClientboundHelloPacket);
+    this.registerClientbound(0x02, ClientboundGameProfilePacket);
+    this.registerClientbound(0x03, ClientboundLoginCompressionPacket);
+    this.registerClientbound(0x04, ClientboundCustomQueryPacket);
   }
-}
-
-export const loginProtocol = new LoginProtocol();
+}();
 
 export * from "./serverbound.ts";
 export * from "./clientbound.ts";

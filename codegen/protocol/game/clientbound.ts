@@ -1,4 +1,4 @@
-import { doc, flow, packet } from "../../protocol.ts";
+import { flow, packet } from "../../protocol.ts";
 import { DefinitionType, ExpressionType, Type } from "../../type.ts";
 import {
   BitFlags,
@@ -64,7 +64,6 @@ import {
   InteractionHand,
   ItemStack,
   LightData,
-  MerchantOffers,
   MessageSignature,
   ParticleOptions,
   PlayerChatMessage,
@@ -78,27 +77,27 @@ import {
 flow("clientbound");
 
 packet("ClientboundAddEntityPacket", {
-  id: VarInt,
+  entityId: VarInt,
   uuid: Uuid,
-  type: EntityType,
+  entityType: EntityType,
   x: Double,
   y: Double,
   z: Double,
-  xRot: Byte,
-  yRot: Byte,
-  yHeadRot: Byte,
-  data: VarInt,
-  xa: Short,
-  ya: Short,
-  za: Short,
+  pitch: Byte,
+  yaw: Byte,
+  headYaw: Byte,
+  data: VarInt.doc("The meaning of this value is dependent on the entity type."),
+  vx: Short.doc("Velocity on the X axis."),
+  vy: Short.doc("Velocity on the Y axis."),
+  vz: Short.doc("Velocity on the Z axis."),
 });
 
 packet("ClientboundAddExperienceOrbPacket", {
-  id: VarInt,
+  entityId: VarInt,
   x: Double,
   y: Double,
   z: Double,
-  value: Short,
+  amount: Short.doc("The amount of experience."),
 });
 
 packet("ClientboundAddPlayerPacket", {
@@ -107,32 +106,39 @@ packet("ClientboundAddPlayerPacket", {
   x: Double,
   y: Double,
   z: Double,
-  yRot: Byte,
-  xRot: Byte,
+  yaw: Byte,
+  pitch: Byte,
 });
 
 packet("ClientboundAnimatePacket", {
-  id: VarInt,
-  action: UnsignedByte,
+  entityId: VarInt,
+  action: Enum([
+    "swing_main_hand",
+    "animate_hurt",
+    "stop_sleeping",
+    "swing_off_hand",
+    "critical_hit",
+    "enchanted_hit",
+  ], UnsignedByte).alias("AnimateAction"),
 });
 
-const Stat = Struct({
-  stat: TaggedUnion("type", StatType, {
-    "minecraft:mined": Struct({ block: Block }),
-    "minecraft:crafted": Struct({ item: Item }),
-    "minecraft:used": Struct({ item: Item }),
-    "minecraft:broken": Struct({ item: Item }),
-    "minecraft:picked_up": Struct({ item: Item }),
-    "minecraft:dropped": Struct({ item: Item }),
-    "minecraft:killed": Struct({ entityType: EntityType }),
-    "minecraft:killed_by": Struct({ entityType: EntityType }),
-    "minecraft:custom": Struct({ customStat: CustomStat }),
-  }),
-  value: VarInt,
-}).alias("Stat");
-
 packet("ClientboundAwardStatsPacket", {
-  stats: List(Stat),
+  stats: List(
+    Struct({
+      stat: TaggedUnion("type", StatType, {
+        "minecraft:mined": Struct({ block: Block }),
+        "minecraft:crafted": Struct({ item: Item }),
+        "minecraft:used": Struct({ item: Item }),
+        "minecraft:broken": Struct({ item: Item }),
+        "minecraft:picked_up": Struct({ item: Item }),
+        "minecraft:dropped": Struct({ item: Item }),
+        "minecraft:killed": Struct({ entityType: EntityType }),
+        "minecraft:killed_by": Struct({ entityType: EntityType }),
+        "minecraft:custom": Struct({ custom: CustomStat }),
+      }),
+      value: VarInt,
+    }).alias("Stat"),
+  ),
 });
 
 packet("ClientboundBlockChangedAckPacket", {
@@ -140,22 +146,36 @@ packet("ClientboundBlockChangedAckPacket", {
 });
 
 packet("ClientboundBlockDestructionPacket", {
-  id: VarInt,
+  entityId: VarInt,
   pos: BlockPos,
-  progress: UnsignedByte,
+  progress: UnsignedByte.doc("The block breaking progress from 0 to 9"),
 });
 
 packet("ClientboundBlockEntityDataPacket", {
   pos: BlockPos,
-  type: BlockEntityType,
+  blockEntityType: BlockEntityType,
   tag: Nbt,
 });
 
+// TODO
 packet("ClientboundBlockEventPacket", {
   pos: BlockPos,
-  type: doc(UnsignedByte, "Type of action (varies depending on block)"),
-  param: doc(UnsignedByte, "Action parameter"),
+  type: UnsignedByte.doc("Type of action (varies depending on block)"),
+  param: UnsignedByte.doc("Action parameter"),
   block: Block,
+  // event: TaggedUnion("action", VarInt, {
+  //   "update_opener_count": Struct({
+  //     block: Block.doc("Is either ender chest, regular chest or shulker box."),
+  //     count: UnsignedByte,
+  //   }), // action 1
+  //   "extend_piston": Struct({ direction: UnsignedByte }), // action 0
+  //   "retract_piston": Struct({ direction: UnsignedByte }), // action 1
+  //   "cancel_extending_piston": Struct({ direction: UnsignedByte }), // action 2
+  //   "play_note_block": null, // action 0
+  //   "ring_bell": Struct({ direction: UnsignedByte }), // action 1
+  //   "reset_spawner_delay": null, // action 1
+  //   "trigger_end_gateway_cooldown": null, // action 1
+  // }),
 });
 
 packet("ClientboundBlockUpdatePacket", {
@@ -205,22 +225,22 @@ const BossBarOperation = TaggedUnion("type", VarInt, {
 }).alias("BossBarOperation");
 
 packet("ClientboundBossEventPacket", {
-  id: Uuid,
+  id: Uuid.doc("Identifier unique to the boss bar."),
   operation: BossBarOperation,
 });
 
 packet("ClientboundChangeDifficultyPacket", {
   difficulty: Difficulty,
-  locked: Boolean,
+  isLocked: Boolean,
 });
 
 packet("ClientboundChatPreviewPacket", {
-  queryId: Int,
+  transactionId: Int,
   preview: Optional(Component),
 });
 
 packet("ClientboundClearTitlesPacket", {
-  resetTimes: Boolean,
+  resetTimes: Boolean.doc("Reset fade-in, stay and fade-out time."),
 });
 
 const Suggestion = Struct({
@@ -229,7 +249,7 @@ const Suggestion = Struct({
 }).alias("Suggestion");
 
 packet("ClientboundCommandSuggestionsPacket", {
-  id: VarInt,
+  transactionId: VarInt,
   rangeStart: VarInt,
   rangeLength: VarInt,
   suggestions: List(Suggestion),
@@ -247,10 +267,11 @@ packet("ClientboundContainerClosePacket", {
 packet("ClientboundContainerSetContentPacket", {
   containerId: UnsignedByte,
   stateId: VarInt,
-  items: List(ItemStack),
+  items: List(ItemStack).doc("The array index corresponds to the slot number."),
   carriedItem: ItemStack,
 });
 
+// TODO: class method to deserialize data slots based on menu type
 packet("ClientboundContainerSetDataPacket", {
   containerId: UnsignedByte,
   id: Short,
@@ -269,14 +290,8 @@ packet("ClientboundCooldownPacket", {
   duration: VarInt,
 });
 
-const CustomChatCompletionsAction = Enum([
-  "add",
-  "remove",
-  "set",
-]).alias("CustomChatCompletionsAction");
-
 packet("ClientboundCustomChatCompletionsPacket", {
-  action: CustomChatCompletionsAction,
+  action: Enum(["add", "remove", "set"]).alias("CustomChatCompletionsAction"),
   entries: List(String()),
 });
 
@@ -297,7 +312,7 @@ packet("ClientboundCustomSoundPacket", {
 });
 
 packet("ClientboundDeleteChatPacket", {
-  messageSignature: ByteArray(),
+  messageSignature: MessageSignature,
 });
 
 packet("ClientboundDisconnectPacket", {
@@ -306,7 +321,7 @@ packet("ClientboundDisconnectPacket", {
 
 packet("ClientboundEntityEventPacket", {
   entityId: Int,
-  eventId: Byte,
+  eventId: Byte.doc("Event ids vary depending on the entity type."),
 });
 
 packet("ClientboundExplodePacket", {
@@ -325,35 +340,33 @@ packet("ClientboundForgetLevelChunkPacket", {
   z: Int,
 });
 
-const GameEvent = Enum([
-  "no_respawn_block_available",
-  "start_raining",
-  "stop_raining",
-  "change_game_mode",
-  "win_game",
-  "demo_event",
-  "arrow_hit_player",
-  "rain_level_change",
-  "thunder_level_change",
-  "puffer_fish_sting",
-  "guardian_elder_effect",
-  "immediate_respawn",
-], UnsignedByte).alias("GameEvent");
-
 packet("ClientboundGameEventPacket", {
-  event: GameEvent,
-  param: Float,
+  event: Enum([
+    "no_respawn_block_available",
+    "start_raining",
+    "stop_raining",
+    "change_game_mode",
+    "win_game",
+    "demo_event",
+    "arrow_hit_player",
+    "rain_level_change",
+    "thunder_level_change",
+    "puffer_fish_sting",
+    "guardian_elder_effect",
+    "immediate_respawn",
+  ], UnsignedByte).alias("GameEvent"),
+  value: Float.doc("Varies depending on event."),
 });
 
 packet("ClientboundHorseScreenOpenPacket", {
   containerId: UnsignedByte,
-  size: VarInt,
+  containerSize: VarInt.doc("Number of slots the container has."),
   entityId: Int,
 });
 
 packet("ClientboundInitializeBorderPacket", {
-  newCenterX: Double,
-  newCenterZ: Double,
+  centerX: Double,
+  centerZ: Double,
   oldSize: Double,
   newSize: Double,
   lerpTime: VarLong,
@@ -374,53 +387,53 @@ packet("ClientboundLevelChunkWithLightPacket", {
 });
 
 packet("ClientboundLevelEventPacket", {
-  type: Int,
+  eventId: Int,
   pos: BlockPos,
   data: Int,
-  globalEvent: Boolean,
+  isGlobal: Boolean,
 });
 
 packet("ClientboundLevelParticlesPacket", {
-  overrideLimiter: Boolean,
+  overrideLimiter: Boolean.doc("Increases visible particle distance."),
   x: Double,
   y: Double,
   z: Double,
-  xDist: Float,
-  yDist: Float,
-  zDist: Float,
+  randomX: Float,
+  randomY: Float,
+  randomZ: Float,
   maxSpeed: Float,
   count: Int,
   particle: ParticleOptions(ParticleType),
 }, (context) => {
-  const particleType = context.declare("particleType", () => VarInt.reader(context));
+  const particleType = context.declare("particleType", () => VarInt.read(context));
   return [
-    context.declare("overrideLimiter", () => Boolean.reader(context)),
-    context.declare("x", () => Double.reader(context)),
-    context.declare("y", () => Double.reader(context)),
-    context.declare("z", () => Double.reader(context)),
-    context.declare("xDist", () => Float.reader(context)),
-    context.declare("yDist", () => Float.reader(context)),
-    context.declare("zDist", () => Float.reader(context)),
-    context.declare("maxSpeed", () => Float.reader(context)),
-    context.declare("count", () => Int.reader(context)),
+    context.declare("overrideLimiter", () => Boolean.read(context)),
+    context.declare("x", () => Double.read(context)),
+    context.declare("y", () => Double.read(context)),
+    context.declare("z", () => Double.read(context)),
+    context.declare("randomX", () => Float.read(context)),
+    context.declare("randomY", () => Float.read(context)),
+    context.declare("randomZ", () => Float.read(context)),
+    context.declare("maxSpeed", () => Float.read(context)),
+    context.declare("count", () => Int.read(context)),
     context.declare("particle", () => {
       return ParticleOptions(
         new ExpressionType("number", particleType.use()),
-      ).reader(context);
+      ).read(context);
     }),
   ];
 }, (context) => {
-  ParticleType.writer(context, "this.particle.type");
-  Boolean.writer(context, "this.overrideLimiter");
-  Double.writer(context, "this.x");
-  Double.writer(context, "this.y");
-  Double.writer(context, "this.z");
-  Float.writer(context, "this.xDist");
-  Float.writer(context, "this.yDist");
-  Float.writer(context, "this.zDist");
-  Float.writer(context, "this.maxSpeed");
-  Int.writer(context, "this.count");
-  ParticleOptions(new DefinitionType("number")).writer(context, "this.particle");
+  ParticleType.write(context, "this.particle.type");
+  Boolean.write(context, "this.overrideLimiter");
+  Double.write(context, "this.x");
+  Double.write(context, "this.y");
+  Double.write(context, "this.z");
+  Float.write(context, "this.randomX");
+  Float.write(context, "this.randomY");
+  Float.write(context, "this.randomZ");
+  Float.write(context, "this.maxSpeed");
+  Int.write(context, "this.count");
+  ParticleOptions(new DefinitionType("number")).write(context, "this.particle");
 });
 
 packet("ClientboundLightUpdatePacket", {
@@ -444,7 +457,7 @@ const NullableGameType = Custom(Optional(GameType), (context) => {
   context.statement(`${reader} = new Reader(bytes)`);
   context.statement(`if (new Reader(bytes).readByte() != -1) {\n${
     context.capture(() => {
-      context.statement(`${gameType.use()} = ${GameType.reader(context)}`);
+      context.statement(`${gameType.use()} = ${GameType.read(context)}`);
     }).statementBlock
   }}`);
   context.statement(`else {\n${context.reader}.readByte();\n}`);
@@ -452,14 +465,14 @@ const NullableGameType = Custom(Optional(GameType), (context) => {
 }, (context, value) => {
   context.statement(`if (${value} != null) {\n${
     context.capture(() => {
-      GameType.writer(context, value);
+      GameType.write(context, value);
     }).statementBlock
   }}`);
   context.statement(`else {\n${context.writer}.writeByte(-1);\n}`);
 }).alias("NullableGameType");
 
 packet("ClientboundLoginPacket", {
-  playerId: Int,
+  entityId: Int,
   hardcore: Boolean,
   gameType: GameType,
   previousGameType: NullableGameType,
@@ -511,8 +524,8 @@ const MapDecorationType = Enum([
 const MapDecoration = Struct({
   type: MapDecorationType,
   x: Byte,
-  y: Byte,
-  rot: Byte,
+  z: Byte,
+  rotation: Byte,
   name: Optional(Component),
 }).alias("MapDecoration");
 
@@ -520,13 +533,13 @@ const MapPatch = Struct({
   width: Byte,
   height: Byte,
   startX: Byte,
-  startY: Byte,
-  mapColors: ByteArray(),
+  startZ: Byte,
+  colors: ByteArray(),
 });
 
 const NullableMapPatch = Custom(Optional(MapPatch), (context) => {
   const patch = context.declare("patch", Optional(MapPatch).definition, "null");
-  const width = context.declare("width", () => Byte.reader(context));
+  const width = context.declare("width", () => Byte.read(context));
   context.statement(`if (${width.use()} != 0) {\n${
     context.capture(() => {
       context.statement(`${patch.use()} = ${
@@ -534,9 +547,9 @@ const NullableMapPatch = Custom(Optional(MapPatch), (context) => {
           width: new ExpressionType("number", width.use()),
           height: Byte,
           startX: Byte,
-          startY: Byte,
-          mapColors: ByteArray(),
-        }).reader(context)
+          startZ: Byte,
+          colors: ByteArray(),
+        }).read(context)
       }`);
     }).statementBlock
   }}`);
@@ -544,23 +557,36 @@ const NullableMapPatch = Custom(Optional(MapPatch), (context) => {
 }, (context, value) => {
   context.statement(
     `if (${value} != null) {\n${
-      context.capture(() => MapPatch.writer(context, value)).statementBlock
+      context.capture(() => MapPatch.write(context, value)).statementBlock
     }}`,
   );
-  context.statement(`else {\n${context.capture(() => Byte.writer(context, "0")).statementBlock}}`);
+  context.statement(`else {\n${context.capture(() => Byte.write(context, "0")).statementBlock}}`);
 }).alias("NullableMapPatch");
 
 packet("ClientboundMapItemDataPacket", {
   mapId: VarInt,
-  scale: Byte,
+  scale: Byte.doc("Value from 0 to 4 (blocks per pixel: 2 ^ scale)"),
   locked: Boolean,
   decorations: Optional(List(MapDecoration)),
-  colorPatch: NullableMapPatch,
+  patch: NullableMapPatch,
 });
+
+const MerchantOffer = Struct({
+  baseCostA: Item,
+  result: Item,
+  costB: Item,
+  isOutOfStock: Boolean,
+  uses: Int,
+  maxUses: Int,
+  xp: Int,
+  specialPriceDiff: Int,
+  priceMultiplier: Float,
+  demand: Int,
+}).alias("MerchantOffer");
 
 packet("ClientboundMerchantOffersPacket", {
   containerId: VarInt,
-  offers: MerchantOffers,
+  offers: List(MerchantOffer),
   villagerLevel: VarInt,
   villagerXp: VarInt,
   showProgress: Boolean,
@@ -580,15 +606,15 @@ packet("ClientboundMoveEntityPosRotPacket", {
   x: Short,
   y: Short,
   z: Short,
-  yRot: Byte,
-  xRot: Byte,
+  yaw: Byte,
+  pitch: Byte,
   onGround: Boolean,
 });
 
 packet("ClientboundMoveEntityRotPacket", {
   entityId: VarInt,
-  yRot: Byte,
-  xRot: Byte,
+  yaw: Byte,
+  pitch: Byte,
   onGround: Boolean,
 });
 
@@ -596,8 +622,8 @@ packet("ClientboundMoveVehiclePacket", {
   x: Double,
   y: Double,
   z: Double,
-  yRot: Float,
-  xRot: Float,
+  yaw: Float,
+  pitch: Float,
 });
 
 packet("ClientboundOpenBookPacket", {
@@ -745,7 +771,7 @@ packet("ClientboundRecipePacket", {
   recipes: List(ResourceLocation),
   action: RecipeAction(RecipeActionType),
 }, (context) => {
-  const action = context.declare("action", () => VarInt.reader(context));
+  const action = context.declare("action", () => VarInt.read(context));
   const map = context.declare(
     "map",
     Map(RecipeBookType, RecipeBookSettings).definition,
@@ -760,33 +786,33 @@ packet("ClientboundRecipePacket", {
             const key =
               `Array.from<RecipeBookType>(["crafting", "furnace", "blast_furnace", "smoker"])[${i}]!`;
             context.statement(
-              `${map.use()}.set(${key}, ${RecipeBookSettings.reader(context)})`,
+              `${map.use()}.set(${key}, ${RecipeBookSettings.read(context)})`,
             );
           }).statementBlock
         }}`,
       );
       return map.use();
     }),
-    context.declare("recipes", () => List(ResourceLocation).reader(context)),
+    context.declare("recipes", () => List(ResourceLocation).read(context)),
     context.declare("action", () => {
       return RecipeAction(
         new ExpressionType("number", action.use()),
-      ).reader(context);
+      ).read(context);
     }),
   ];
 }, (context) => {
-  RecipeActionType.writer(context, `this.action.type`);
+  RecipeActionType.write(context, `this.action.type`);
   context.statement(
     `for (const bookType of Array.from<RecipeBookType>(["crafting", "furnace", "blast_furnace", "smoker"])) {\n${
       context.capture(() => {
         const settings = context.declare("settings", () => `this.bookSettings.get(bookType)`);
-        Boolean.writer(context, `${settings.use()}?.open ?? false`);
-        Boolean.writer(context, `${settings.use()}?.filtering ?? false`);
+        Boolean.write(context, `${settings.use()}?.open ?? false`);
+        Boolean.write(context, `${settings.use()}?.filtering ?? false`);
       }).statementBlock
     }}`,
   );
-  List(ResourceLocation).writer(context, "this.recipes");
-  RecipeAction(new DefinitionType("number")).writer(context, "this.action");
+  List(ResourceLocation).write(context, "this.recipes");
+  RecipeAction(new DefinitionType("number")).write(context, "this.action");
 });
 
 packet("ClientboundRemoveEntitiesPacket", {
@@ -940,10 +966,10 @@ const EntityDataValue = TaggedUnion("type", VarInt, {
   }),
   "optional_unsigned_int": Struct({
     value: Custom(Optional(VarInt), (context) => {
-      const value = context.declare("value", () => VarInt.reader(context));
+      const value = context.declare("value", () => VarInt.read(context));
       return `${value.use()} > 0 ? ${value.use()} - 1 : null`;
     }, (context, value) => {
-      VarInt.writer(context, `${value} != null ? ${value} + 1 : 0`);
+      VarInt.write(context, `${value} != null ? ${value} + 1 : 0`);
     }),
   }),
   "pose": Struct({ pose: Pose }),
@@ -958,7 +984,7 @@ const EntityData = Custom(Map(Byte, EntityDataValue), (context) => {
   const capture = context.capture(() => {
     const id = context.declare("id", () => `${context.reader}.readByte()`);
     context.statement(`if (${id.use()} == -1) break`);
-    return `${map.use()}.set(${id.use()}, ${EntityDataValue.reader(context)})`;
+    return `${map.use()}.set(${id.use()}, ${EntityDataValue.read(context)})`;
   });
   context.statement(`while (true) {\n${capture.statementBlock}${capture.value}}`);
   return map.use();
@@ -968,12 +994,12 @@ const EntityData = Custom(Map(Byte, EntityDataValue), (context) => {
   context.statement(
     `for (const [${id.identifier}, ${data.identifier}] of ${value}) {\n${
       context.capture(() => {
-        Byte.writer(context, id.identifier);
-        EntityDataValue.writer(context, data.identifier);
+        Byte.write(context, id.identifier);
+        EntityDataValue.write(context, data.identifier);
       }).statementBlock
     }}`,
   );
-  Byte.writer(context, "-1");
+  Byte.write(context, "-1");
 }).alias("EntityData");
 
 packet("ClientboundSetEntityDataPacket", {
@@ -997,32 +1023,32 @@ packet("ClientboundSetEquipmentPacket", {
   entity: VarInt,
   slots: Map(EquipmentSlot, ItemStack),
 }, (context) => {
-  const entity = context.declare("entity", () => VarInt.reader(context));
+  const entity = context.declare("entity", () => VarInt.read(context));
   const slots = context.declare("slots", Map(EquipmentSlot, ItemStack).definition, "new Map()");
   const i = context.declare("i", "number");
   context.statement(`do {\n${
     context.capture(() => {
-      context.statement(`${i.use()} = ${Byte.reader(context)}`);
+      context.statement(`${i.use()} = ${Byte.read(context)}`);
       // TODO: this is too hacky
       const slot = context.declare("slot", () => {
-        const capture = context.capture(() => EquipmentSlot.inner.reader(context));
+        const capture = context.capture(() => EquipmentSlot.inner.read(context));
         return capture.value.replace(`${context.reader}.readVarInt()`, `${i.use()} & 127`);
       });
-      context.statement(`${slots.use()}.set(${slot.use()}, ${ItemStack.reader(context)})`);
+      context.statement(`${slots.use()}.set(${slot.use()}, ${ItemStack.read(context)})`);
     }).statementBlock
   }} while ((i & -128) != 0);`);
   return [entity, slots];
 }, (context) => {
-  VarInt.writer(context, "this.entity");
+  VarInt.write(context, "this.entity");
   context.statement("const slots = [...this.slots.keys()]");
   context.statement(`for (let i = 0; i < slots.length; i++) {\n${
     context.capture(() => {
       // TODO: this is too hacky
       const id = context.capture(() => {
-        EquipmentSlot.inner.writer(context, `slots[i]!`);
+        EquipmentSlot.inner.write(context, `slots[i]!`);
       }).statementBlock.match(/\((.+)\);/)?.[1]!;
-      Byte.writer(context, `${id} | (i != slots.length - 1 ? -128 : 0)`);
-      ItemStack.writer(context, "this.slots.get(slots[i]!)!");
+      Byte.write(context, `${id} | (i != slots.length - 1 ? -128 : 0)`);
+      ItemStack.write(context, "this.slots.get(slots[i]!)!");
     }).statementBlock
   }}`);
 });
@@ -1138,27 +1164,27 @@ packet("ClientboundStopSoundPacket", {
   source: Optional(SoundSource),
   name: Optional(ResourceLocation),
 }, (context) => {
-  const flags = context.declare("flags", () => Byte.reader(context));
+  const flags = context.declare("flags", () => Byte.read(context));
   return [
     context.declare("source", () => {
       return SoundSource.optional(
         new ExpressionType("boolean", `(${flags.use()} & 0x1) != 0`),
-      ).reader(context);
+      ).read(context);
     }),
     context.declare("name", () => {
       return ResourceLocation.optional(
         new ExpressionType("boolean", `(${flags.use()} & 0x1) != 0`),
-      ).reader(context);
+      ).read(context);
     }),
   ];
 }, (context) => {
-  Byte.writer(context, `-(this.source != null) & 0x1 | -(this.name != null) & 0x2`);
+  Byte.write(context, `-(this.source != null) & 0x1 | -(this.name != null) & 0x2`);
   SoundSource.optional(
     new ExpressionType("boolean", "this.source != null"),
-  ).writer(context, "this.source");
+  ).write(context, "this.source");
   ResourceLocation.optional(
     new ExpressionType("boolean", "this.name != null"),
-  ).writer(context, "this.name");
+  ).write(context, "this.name");
 });
 
 packet("ClientboundSystemChatPacket", {
@@ -1210,10 +1236,10 @@ const DisplayInfo = Merge(
     showToast: Boolean,
     hidden: Boolean,
   }, (context) => {
-    const flags = context.declare("flags", () => Int.reader(context));
+    const flags = context.declare("flags", () => Int.read(context));
     const background = context.declare("background", Optional(ResourceLocation).definition, "null");
     context.statement(
-      `if ((${flags.use()} & 0x1) != 0) ${background.use()} = ${ResourceLocation.reader(context)}`,
+      `if ((${flags.use()} & 0x1) != 0) ${background.use()} = ${ResourceLocation.read(context)}`,
     );
     return {
       background,
@@ -1221,14 +1247,14 @@ const DisplayInfo = Merge(
       hidden: context.declare("hidden", () => `(${flags.use()} & 0x4) != 0`),
     };
   }, (context, value) => {
-    Int.writer(
+    Int.write(
       context,
       `-(${value}.background != null) & 0x1 | -${value}.showToast & 0x2 | -${value}.hidden & 0x4`,
     );
     context.statement(
       `if (${value}.background != null) {\n${
         context.capture(() => {
-          ResourceLocation.writer(context, `${value}.background`);
+          ResourceLocation.write(context, `${value}.background`);
         }).statementBlock
       }}`,
     );
@@ -1304,26 +1330,26 @@ const RecipeSerializer = (type: Type) => {
       ingredients: List(Ingredient),
       result: ItemStack,
     }, (context) => {
-      const width = context.declare("width", () => VarInt.reader(context));
-      const height = context.declare("height", () => VarInt.reader(context));
+      const width = context.declare("width", () => VarInt.read(context));
+      const height = context.declare("height", () => VarInt.read(context));
       return {
         width,
         height,
-        group: context.declare("group", () => String().reader(context)),
+        group: context.declare("group", () => String().read(context)),
         ingredients: context.declare("ingredients", () => {
           return List(
             Ingredient,
             new ExpressionType("number", `${width.use()} * ${height.use()}`),
-          ).reader(context);
+          ).read(context);
         }),
-        result: context.declare("result", () => ItemStack.reader(context)),
+        result: context.declare("result", () => ItemStack.read(context)),
       };
     }, (context, value) => {
-      VarInt.writer(context, `${value}.width`);
-      VarInt.writer(context, `${value}.height`);
-      String().writer(context, `${value}.group`);
-      List(Ingredient, 0).writer(context, `${value}.ingredients`);
-      ItemStack.writer(context, `${value}.result`);
+      VarInt.write(context, `${value}.width`);
+      VarInt.write(context, `${value}.height`);
+      String().write(context, `${value}.group`);
+      List(Ingredient, 0).write(context, `${value}.ingredients`);
+      ItemStack.write(context, `${value}.result`);
     }),
     "minecraft:crafting_shapeless": Struct({
       group: String(),
@@ -1364,19 +1390,19 @@ const Recipe = CustomStruct({
   id: ResourceLocation,
   serializer: RecipeSerializer(ResourceLocation),
 }, (context) => {
-  const serializerId = context.declare("serializerId", () => ResourceLocation.reader(context));
+  const serializerId = context.declare("serializerId", () => ResourceLocation.read(context));
   return {
-    id: context.declare("id", () => ResourceLocation.reader(context)),
+    id: context.declare("id", () => ResourceLocation.read(context)),
     serializer: context.declare("serializer", () => {
       return RecipeSerializer(
         new ExpressionType("string", serializerId.use()),
-      ).reader(context);
+      ).read(context);
     }),
   };
 }, (context, value) => {
-  ResourceLocation.writer(context, `${value}.serializer.id`);
-  ResourceLocation.writer(context, `${value}.id`);
-  RecipeSerializer(new DefinitionType("string")).writer(context, `${value}.serializer`);
+  ResourceLocation.write(context, `${value}.serializer.id`);
+  ResourceLocation.write(context, `${value}.id`);
+  RecipeSerializer(new DefinitionType("string")).write(context, `${value}.serializer`);
 }).alias("Recipe");
 
 packet("ClientboundUpdateRecipesPacket", {

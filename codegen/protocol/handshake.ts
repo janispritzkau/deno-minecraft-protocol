@@ -1,13 +1,18 @@
-import { doc, flow, packet, protocol } from "../protocol.ts";
-import { Short, String, VarInt } from "../types.ts";
+import { flow, packet, protocol } from "../protocol.ts";
+import { Enum, Short, String, VarInt } from "../types.ts";
 
-protocol("handshake", -1);
+protocol("handshake");
 
 flow("serverbound");
+
+const HandshakeIntention = Enum({
+  "status": 1,
+  "login": 2,
+}).alias("HandshakeIntention");
 
 packet("ClientIntentionPacket", {
   protocolVersion: VarInt,
   hostname: String(255),
   port: Short,
-  intention: doc(VarInt, "The next protocol state"),
+  intention: HandshakeIntention.doc("The next protocol state."),
 });

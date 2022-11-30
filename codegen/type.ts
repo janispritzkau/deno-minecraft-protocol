@@ -1,49 +1,5 @@
-export interface Statement {
-  readonly code: string;
-  readonly variable: Variable | null;
-  push(): void;
-}
-
-export interface Variable {
-  name: string;
-  identifier: string;
-  readonly hasSideEffect: boolean;
-  readonly expression: string | null;
-  readonly statement: Statement;
-  readonly used: boolean;
-  use(): string;
-}
-
-export interface Capture<T> {
-  value: T;
-  statements: Statement[];
-  readonly statementBlock: string;
-}
-
-export interface CaptureOptions {
-  /** Name of the `Reader` instance. */
-  reader?: string;
-  /** Name of the `Writer` instance. */
-  writer?: string;
-}
-
-export interface TypeContext {
-  readonly reader: string;
-  readonly writer: string;
-  global(name: string, init?: string): string;
-  constant(key: symbol, expression?: string): string;
-  /** Pushes a statement to the stack. */
-  statement(code: string): void;
-  /** Defines a let variable. */
-  declare(name: string, type?: string, expression?: string, hasSideEffect?: boolean): Variable;
-  /** Defines a const variable with lazy evaluated expression. */
-  declare(name: string, evaluate: () => string, hasSideEffect?: boolean, type?: string): Variable;
-  /** Captures variable declarations and statements declared inside the callback function. */
-  capture<T>(fn: () => T, options?: CaptureOptions): Capture<T>;
-  alias(type: Type, name: string): void;
-  alias(type: Type): string | null;
-  type(type: Type): string;
-}
+import { TypeContext, Variable } from "./type_context.ts";
+import { formatDocComment } from "./utils.ts";
 
 export abstract class Type {
   get subtypes(): Type[] {
@@ -59,14 +15,14 @@ export abstract class Type {
   }
 
   /** Defines reader code and returns the value expression. */
-  reader(context: TypeContext): string;
-  reader(): never {
+  read(context: TypeContext): string;
+  read(): never {
     throw new Error(`No reader method defined for ${this.constructor.name}`);
   }
 
   /** Creates writer code by pushing statements to the type context's stack. */
-  writer(context: TypeContext, expression: string): void;
-  writer(): void {}
+  write(context: TypeContext, expression: string): void;
+  write(): void {}
 
   /** Initializes globals and constants. */
   init(context: TypeContext): void {
@@ -79,6 +35,11 @@ export abstract class Type {
 
   optional(isPresent: Type): Type {
     return new OptionalType(this, isPresent);
+  }
+
+  doc(description: string) {
+    if (this instanceof DocumentedType) throw new Error("Type is already documented");
+    return new DocumentedType(description, this);
   }
 }
 
@@ -110,12 +71,12 @@ export class NativeType extends Type {
     return this.definition.includes("|") ? `(${this.definition})` : this.definition;
   }
 
-  reader(context: TypeContext): string {
-    const args = this.readArguments.map((arg) => arg.reader(context));
+  read(context: TypeContext): string {
+    const args = this.readArguments.map((arg) => arg.read(context));
     return `${context.reader}.read${this.suffix}(${args.join(", ")})`;
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     context.statement(`${context.writer}.write${this.suffix}(${expression});`);
   }
 }
@@ -143,9 +104,9 @@ export class OptionalType extends Type {
     return `(${this.definition})`;
   }
 
-  reader(context: TypeContext): string {
-    const isPresent = this.isPresent.reader(context);
-    const capture = context.capture(() => this.value.reader(context));
+  read(context: TypeContext): string {
+    const isPresent = this.isPresent.read(context);
+    const capture = context.capture(() => this.value.read(context));
     if (capture.statements.length > 0) {
       const value = context.declare("value", context.type(this), "null");
       const block = `${capture.statementBlock}${value.use()} = ${capture.value};\n`;
@@ -155,9 +116,9 @@ export class OptionalType extends Type {
     return `${isPresent} ? ${capture.value} : null`;
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.isPresent.writer(context, `${expression} != null`);
-    const capture = context.capture(() => this.value.writer(context, expression));
+  write(context: TypeContext, expression: string): void {
+    this.isPresent.write(context, `${expression} != null`);
+    const capture = context.capture(() => this.value.write(context, expression));
     const statement = capture.statements.length > 1
       ? `{\n${capture.statementBlock}}`
       : capture.statementBlock;
@@ -183,21 +144,21 @@ export class ListType extends Type {
     return `${this.item.safeDefinition}[]`;
   }
 
-  reader(context: TypeContext): string {
-    const length = context.declare("length", () => this.length.reader(context));
+  read(context: TypeContext): string {
+    const length = context.declare("length", () => this.length.read(context));
     const list = context.declare("list", () => "[]", true, context.type(this));
     const { identifier: i } = context.declare("i");
-    const capture = context.capture(() => this.item.reader(context));
+    const capture = context.capture(() => this.item.read(context));
     const block = `${capture.statementBlock}${list.use()}.push(${capture.value});\n`;
     const statement = capture.statements.length > 0 ? `{\n${block}}` : block;
     context.statement(`for (let ${i} = ${length.expression}; ${i}--;) ${statement}`);
     return list.use();
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.length.writer(context, `${expression}.length`);
+  write(context: TypeContext, expression: string): void {
+    this.length.write(context, `${expression}.length`);
     const item = context.declare("item");
-    const capture = context.capture(() => this.item.writer(context, item.identifier));
+    const capture = context.capture(() => this.item.write(context, item.identifier));
     const statement = capture.statements.length > 1
       ? `{\n${capture.statementBlock}}`
       : capture.statementBlock;
@@ -223,7 +184,7 @@ export class StructType extends Type {
     return includesDoc ? `{\n${fields.join(";\n")};\n}` : `{ ${fields.join("; ")} }`;
   }
 
-  reader(context: TypeContext): string {
+  read(context: TypeContext): string {
     const { value: variables, statements } = context.capture(() => {
       return this.getFieldVariables(context).map((variable) => {
         variable.use();
@@ -257,15 +218,15 @@ export class StructType extends Type {
     return `{ ${fields.join(", ")} }`;
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     for (const name in this.fields) {
-      this.fields[name]!.writer(context, `${expression}.${name}`);
+      this.fields[name]!.write(context, `${expression}.${name}`);
     }
   }
 
   getFieldVariables(context: TypeContext): Variable[] {
     return Object.entries(this.fields).map(([name, type]) => {
-      return context.declare(name, () => type.reader(context));
+      return context.declare(name, () => type.read(context));
     });
   }
 }
@@ -282,8 +243,8 @@ export class MergeStructsType extends StructType {
     return this.structs.flatMap((struct) => [struct, ...struct.subtypes]);
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.structs.forEach((struct) => struct.writer(context, expression));
+  write(context: TypeContext, expression: string): void {
+    this.structs.forEach((struct) => struct.write(context, expression));
   }
 
   getFieldVariables(context: TypeContext): Variable[] {
@@ -308,14 +269,14 @@ export class MapType extends Type {
     return `Map<${this.key.definition}, ${this.value.definition}>`;
   }
 
-  reader(context: TypeContext): string {
-    const length = context.declare("length", () => this.length.reader(context), true);
+  read(context: TypeContext): string {
+    const length = context.declare("length", () => this.length.read(context), true);
     const map = context.declare("map", () => "new Map()", true, context.type(this));
     const { identifier: i } = context.declare("i");
     const { value: { key, value }, statementBlock } = context.capture(() => {
       return {
-        key: context.declare("key", () => this.key.reader(context)).use(),
-        value: context.declare("value", () => this.value.reader(context)).use(),
+        key: context.declare("key", () => this.key.read(context)).use(),
+        value: context.declare("value", () => this.value.read(context)).use(),
       };
     });
     const block = `${statementBlock}${map.use()}.set(${key}, ${value});\n`;
@@ -323,32 +284,32 @@ export class MapType extends Type {
     return map.use();
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     const key = context.declare("key");
     const value = context.declare("value");
     const { statementBlock } = context.capture(() => ({
-      key: this.key.writer(context, key.identifier),
-      value: this.value.writer(context, value.identifier),
+      key: this.key.write(context, key.identifier),
+      value: this.value.write(context, value.identifier),
     }));
-    this.length.writer(context, `${expression}.size`);
+    this.length.write(context, `${expression}.size`);
     context.statement(
       `for (const [${key.identifier}, ${value.identifier}] of ${expression}) {\n${statementBlock}}`,
     );
   }
 }
 
-const ENUM_MAPPER_FACTORY = `\
-function createEnumMapper<T extends string>(keys: T[]) {
-  const idMap = Object.fromEntries(keys.map((key, id) => [key, id]));
+const ENUM_MAPPER_FACTORY = /* ts */ `\
+function createEnumMapper<T extends string>(keyIds: Record<T, number>) {
+  const idKeys = new Map(Object.entries(keyIds).map(([key, id]) => [id, key] as [number, T]));
   return {
     toId(key: T): number {
-      const id = idMap[key];
-      if (id == null) throw new Error("Invalid enum key '\${key}'");
+      const id = keyIds[key];
+      if (id == null) throw new Error("Invalid enum key" + key);
       return id;
     },
     fromId(id: number): T {
-      const key = keys[id];
-      if (key == null) throw new Error(\`Invalid enum id \${key}\`);
+      const key = idKeys.get(id);
+      if (key == null) throw new Error("Invalid enum id" + id);
       return key;
     },
   };
@@ -357,11 +318,11 @@ function createEnumMapper<T extends string>(keys: T[]) {
 export class EnumType extends Type {
   private mapper: symbol;
 
-  constructor(private value: Type, private variants: string[], mapper?: symbol) {
+  constructor(private value: Type, private variants: Record<string, number>) {
     super();
     this.value = value;
     this.variants = variants;
-    this.mapper = mapper ?? Symbol("mapper");
+    this.mapper = Symbol("mapper");
   }
 
   get subtypes(): Type[] {
@@ -369,19 +330,19 @@ export class EnumType extends Type {
   }
 
   get definition(): string {
-    return this.variants.map((variant) => JSON.stringify(variant)).join(" | ");
+    return Object.keys(this.variants).map((key) => JSON.stringify(key)).join(" | ");
   }
 
   get safeDefinition(): string {
     return `(${this.definition})`;
   }
 
-  reader(context: TypeContext): string {
-    return `${context.constant(this.mapper)}.fromId(${this.value.reader(context)})`;
+  read(context: TypeContext): string {
+    return `${context.constant(this.mapper)}.fromId(${this.value.read(context)})`;
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.value.writer(context, `${context.constant(this.mapper)}.toId(${expression})`);
+  write(context: TypeContext, expression: string): void {
+    this.value.write(context, `${context.constant(this.mapper)}.toId(${expression})`);
   }
 
   init(context: TypeContext): void {
@@ -391,12 +352,15 @@ export class EnumType extends Type {
     const mapperName = alias?.replace(/^./, (c) => c.toLowerCase()).replace(/$/, "Enum");
     if (mapperName && this.mapper.description != mapperName) this.mapper = Symbol(mapperName);
 
+    const variantsJson = JSON.stringify(this.variants);
     context.constant(
       this.mapper,
       `createEnumMapper${alias ? `<${alias}>` : ""}(${
-        this.variants.length >= 20
-          ? "JSON.parse(`" + JSON.stringify(this.variants) + "`)"
-          : "[" + this.variants.map((variant) => JSON.stringify(variant)).join(", ") + "]"
+        variantsJson.length > 400
+          ? "JSON.parse(`" + variantsJson + "`)"
+          : `{ ${
+            Object.entries(this.variants).map(([k, v]) => JSON.stringify(k) + ": " + v).join(", ")
+          } }`
       })`,
     );
   }
@@ -435,17 +399,17 @@ export class TaggedUnionType extends Type {
     return `(${Object.values(this.variants).map((struct) => struct.definition).join(" | ")})`;
   }
 
-  reader(context: TypeContext): string {
+  read(context: TypeContext): string {
     const result = context.declare("result", context.type(this));
     context.statement(
-      `switch (${this.tagType.reader(context)}) {\n${
+      `switch (${this.tagType.read(context)}) {\n${
         Object.entries(this.variants).map(([tag, variant], id) => {
           const key = this.tagMapping
             ? this.tagMapping[tag]
             : unwrapType(this.tagType) instanceof EnumType || this.tagType.definition == "string"
             ? JSON.stringify(tag)
             : id;
-          const capture: Capture<string> = context.capture(() => variant.reader(context));
+          const capture = context.capture(() => variant.read(context));
           const block = capture.statementBlock +
             `${result.identifier} = ${capture.value};\nbreak;\n`;
           return capture.statements.some((stmt) => stmt.variable != null)
@@ -457,7 +421,7 @@ export class TaggedUnionType extends Type {
     return result.use();
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     context.statement(
       `switch (${expression}.${this.tag}) {\n${
         Object.entries(this.variants).map(([tag, variant], id) => {
@@ -467,8 +431,8 @@ export class TaggedUnionType extends Type {
             ? JSON.stringify(tag)
             : id;
           const capture = context.capture(() => {
-            this.tagType.writer(context, String(key));
-            variant.writer(context, expression);
+            this.tagType.write(context, String(key));
+            variant.write(context, expression);
           });
           // if (capture.statements.length == 0) return "";
           return `case ${JSON.stringify(tag)}: {\n` + capture.statementBlock + `break;\n}\n`;
@@ -517,8 +481,8 @@ export class PackedType extends StructType {
     return [this.int, ...super.subtypes];
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.int.writer(
+  write(context: TypeContext, expression: string): void {
+    this.int.write(
       context,
       Object.entries(this.fields).map(([name, type]) => {
         if (!(type instanceof ReferencedType)) return null;
@@ -529,11 +493,11 @@ export class PackedType extends StructType {
         return `${value} << ${this.shift[i]!}${this.#suffix}`;
       }).filter((x) => x != null).join(" | "),
     );
-    super.writer(context, expression);
+    super.write(context, expression);
   }
 
   getFieldVariables(context: TypeContext): Variable[] {
-    const p = context.declare("p", () => this.int.reader(context));
+    const p = context.declare("p", () => this.int.read(context));
     for (const [type, index] of this.refs) {
       const bits = this.bits[index]!;
       const shift = this.bits.slice(index + 1).reduce((a, x) => a + x, 0);
@@ -571,18 +535,18 @@ export class BitFlagsType extends StructType {
     return [this.int, ...super.subtypes];
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.int.writer(
+  write(context: TypeContext, expression: string): void {
+    this.int.write(
       context,
       Object.entries(this.masks).map(([name, mask]) => {
         return `(-${expression}.${name} & ${hex(mask)})`;
       }).join(" | "),
     );
-    super.writer(context, expression);
+    super.write(context, expression);
   }
 
   getFieldVariables(context: TypeContext): Variable[] {
-    const flags = context.declare("flags", () => this.int.reader(context));
+    const flags = context.declare("flags", () => this.int.read(context));
     for (const [type, name] of this.refs) {
       type.ref = new ExpressionType("number", `(${flags.use()} & ${hex(this.masks[name]!)}) > 0`);
     }
@@ -616,7 +580,7 @@ export class ExpressionType extends DefinitionType {
     super(definition);
   }
 
-  reader(): string {
+  read(): string {
     return this.expression;
   }
 }
@@ -631,7 +595,7 @@ export class LiteralType extends Type {
     return typeof this.literal;
   }
 
-  reader(): string {
+  read(): string {
     return JSON.stringify(this.literal);
   }
 }
@@ -650,12 +614,12 @@ export class WrappedType extends Type {
     return this.inner.definition;
   }
 
-  reader(context: TypeContext): string {
-    return this.inner.reader(context);
+  read(context: TypeContext): string {
+    return this.inner.read(context);
   }
 
-  writer(context: TypeContext, expression: string): void {
-    return this.inner.writer(context, expression);
+  write(context: TypeContext, expression: string): void {
+    return this.inner.write(context, expression);
   }
 }
 
@@ -665,7 +629,7 @@ export class DocumentedType extends WrappedType {
   }
 
   get comment(): string {
-    return `/** ${this.description} */\n`;
+    return formatDocComment(this.description);
   }
 }
 
@@ -676,9 +640,9 @@ export class ReferencedType extends DefinitionType {
     super(definition);
   }
 
-  reader(context: TypeContext): string {
+  read(context: TypeContext): string {
     if (!this.ref) throw new Error("No reference set");
-    return this.ref.reader(context);
+    return this.ref.read(context);
   }
 }
 
@@ -714,19 +678,22 @@ export class ExportedType extends AliasedType {
     return [];
   }
 
-  reader(context: TypeContext): string {
+  read(context: TypeContext): string {
+    if (this.inner instanceof EnumType) return this.inner.read(context);
     return `${context.global(this.readFn)}(${context.reader})`;
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
+    if (this.inner instanceof EnumType) return this.inner.write(context, expression);
     context.statement(`${context.global(this.writeFn)}(${context.writer}, ${expression});`);
   }
 
   init(context: TypeContext, initInnerType = false): void {
     if (initInnerType) super.init(context);
+    if (this.inner instanceof EnumType) return;
 
     const readerCapture = context.capture(() => {
-      return this.inner.reader(context);
+      return this.inner.read(context);
     }, { reader: "reader" });
 
     context.global(
@@ -736,7 +703,7 @@ export class ExportedType extends AliasedType {
 
     const writerCapture = context.capture(() => {
       const value = context.declare("value");
-      this.inner.writer(context, value.identifier);
+      this.inner.write(context, value.identifier);
       return value.identifier;
     }, { writer: "writer" });
 
@@ -756,11 +723,11 @@ export class CustomType extends WrappedType {
     super(definition instanceof Type ? definition : new DefinitionType(definition));
   }
 
-  reader(context: TypeContext): string {
+  read(context: TypeContext): string {
     return this.readFn(context);
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     this.writeFn(context, expression);
   }
 }
@@ -779,12 +746,12 @@ export class SerializableType extends Type {
     return this.name;
   }
 
-  reader(context: TypeContext): string {
-    return this.deserializer(this.value.reader(context));
+  read(context: TypeContext): string {
+    return this.deserializer(this.value.read(context));
   }
 
-  writer(context: TypeContext, expression: string): void {
-    this.value.writer(context, this.serializer(expression));
+  write(context: TypeContext, expression: string): void {
+    this.value.write(context, this.serializer(expression));
   }
 }
 
@@ -801,7 +768,7 @@ export class CustomStructType extends StructType {
     ));
   }
 
-  writer(context: TypeContext, expression: string): void {
+  write(context: TypeContext, expression: string): void {
     this.writeFn(context, expression);
   }
 
@@ -811,179 +778,6 @@ export class CustomStructType extends StructType {
       return context.declare(name, () => variable.use());
     });
   }
-}
-
-/*
-  Type context
-*/
-
-export interface TypeContextOptions {
-  defineGlobal(init: string, name: string): void;
-  defineConstant(name: string, expression: string): string;
-  onUse?(name: string): void;
-}
-
-export function createTypeContext(options: TypeContextOptions): TypeContext {
-  const globals = new Set<string>();
-  const constants = new Map<symbol, string>();
-  const typeAliases = new Map<string, string>();
-
-  const stack: Statement[][] = [];
-  const variableStatements = new WeakMap<Statement, Variable>();
-
-  const pushStatement = (evaluate: () => string) => {
-    const statement: Statement = Object.freeze<Statement>({
-      get code() {
-        return evaluate().replace(/(?<!\n)$/, "\n");
-      },
-      get variable() {
-        return variableStatements.get(statement) ?? null;
-      },
-      push() {
-        const statements = stack.pop();
-        if (statements == null) throw new Error("Uncaptured statement");
-        statements.push(statement);
-        stack.push(statements);
-      },
-    });
-    statement.push();
-    return statement;
-  };
-
-  let currentReader = "reader";
-  let currentWriter = "writer";
-
-  const context: TypeContext = {
-    get reader() {
-      return currentReader;
-    },
-
-    get writer() {
-      return currentWriter;
-    },
-
-    global(name, init) {
-      options.onUse?.(name);
-      if (globals.has(name)) return name;
-      if (init == null) throw new Error("Global not defined");
-      options.defineGlobal(init, name);
-      globals.add(name);
-      return name;
-    },
-
-    constant(key, expression) {
-      let name = constants.get(key);
-      if (name != null) {
-        options.onUse?.(name);
-        return name;
-      }
-      if (key.description == null) throw new Error("Key must have a description");
-      if (expression == null) throw new Error("Constant is not defined");
-      name = options.defineConstant(key.description, expression);
-      constants.set(key, name);
-      options.onUse?.(name);
-      return name;
-    },
-
-    statement(code) {
-      pushStatement(() => code);
-    },
-
-    declare(name, evalOrType, exprOrSideEffect?, sideEffectOrType?) {
-      let identifier = name;
-      let suffix = 1;
-      while (
-        identifier == currentReader || identifier == currentWriter ||
-        stack.flat().some((s) => variableStatements.get(s)?.identifier == identifier)
-      ) {
-        identifier = name + suffix;
-        suffix++;
-      }
-
-      let used = false;
-
-      const variable: Variable = Object.freeze<Variable>({
-        name,
-        identifier,
-        get hasSideEffect() {
-          return evalOrType instanceof Function
-            ? exprOrSideEffect as boolean ?? true
-            : sideEffectOrType as boolean ?? true;
-        },
-        get expression() {
-          return expression ?? null;
-        },
-        get statement() {
-          return statement;
-        },
-        get used() {
-          return used;
-        },
-        use() {
-          used = true;
-          return identifier;
-        },
-      });
-
-      const letOrConst = evalOrType instanceof Function ? "const" : "let";
-      const type = evalOrType instanceof Function ? sideEffectOrType as string : evalOrType;
-
-      const statement = pushStatement(() => {
-        return `${letOrConst} ${identifier}${type ? ": " + type : ""}${
-          expression ? ` = ${expression}` : ""
-        };`;
-      });
-      variableStatements.set(statement, variable);
-
-      stack.push([]);
-      const expression = evalOrType instanceof Function ? evalOrType() : exprOrSideEffect as string;
-      const statements = stack.pop()!;
-      stack[stack.length - 1]!.splice(-1, 0, ...statements);
-
-      return variable;
-    },
-
-    capture(fn, options) {
-      stack.push([]);
-      const [reader, writer] = [currentReader, currentWriter];
-      if (options?.reader) currentReader = options.reader;
-      if (options?.writer) currentWriter = options.writer;
-      const value = fn();
-      [currentReader, currentWriter] = [reader, writer];
-      const statements = stack.pop()!.filter((stmt) => variableStatements.get(stmt)?.used ?? true);
-      return {
-        value,
-        statements,
-        get statementBlock() {
-          return statements.map((stmt) => stmt.code).join("");
-        },
-      };
-    },
-
-    alias(type, alias?: string) {
-      if (alias == null) {
-        const alias = typeAliases.get(type.definition);
-        if (alias) options.onUse?.(alias);
-        return alias ?? null;
-      }
-      if (type instanceof DocumentedType) {
-        context.global(alias, type.comment + `type ${alias} = ${type.definition};`);
-        typeAliases.set(type.inner.definition, alias);
-      } else {
-        context.global(alias, `type ${alias} = ${type.definition};`);
-      }
-      typeAliases.set(type.definition, alias);
-      return alias;
-    },
-
-    type(type) {
-      const alias = typeAliases.get(type.definition);
-      if (alias) options.onUse?.(alias);
-      return alias ?? type.definition;
-    },
-  };
-
-  return context;
 }
 
 function unwrapType(type: Type) {

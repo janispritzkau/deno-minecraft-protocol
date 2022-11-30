@@ -1,7 +1,17 @@
 // deno-lint-ignore-file
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
-import { Component, GameProfile, readGameProfile, readProperties, readResourceLocation, ResourceLocation, writeGameProfile, writeProperties, writeResourceLocation } from "../types.ts";
+import {
+  Component,
+  GameProfile,
+  readGameProfile,
+  readProperties,
+  readResourceLocation,
+  ResourceLocation,
+  writeGameProfile,
+  writeProperties,
+  writeResourceLocation,
+} from "../types.ts";
 
 export interface ClientLoginHandler extends PacketHandler {
   handleLoginDisconnect?(packet: ClientboundLoginDisconnectPacket): Promise<void>;
@@ -22,8 +32,8 @@ export class ClientboundLoginDisconnectPacket implements Packet<ClientLoginHandl
   write(writer: Writer) {
     writer.writeJson(this.reason);
   }
-  handle(handler: ClientLoginHandler) {
-    return handler.handleLoginDisconnect?.(this);
+  async handle(handler: ClientLoginHandler) {
+    await handler.handleLoginDisconnect?.(this);
   }
 }
 
@@ -44,24 +54,24 @@ export class ClientboundHelloPacket implements Packet<ClientLoginHandler> {
     writer.writeByteArray(this.publicKey);
     writer.writeByteArray(this.nonce);
   }
-  handle(handler: ClientLoginHandler) {
-    return handler.handleHello?.(this);
+  async handle(handler: ClientLoginHandler) {
+    await handler.handleHello?.(this);
   }
 }
 
 export class ClientboundGameProfilePacket implements Packet<ClientLoginHandler> {
   constructor(
-    public gameProfile: GameProfile,
+    public profile: GameProfile,
   ) {}
   static read(reader: Reader) {
-    const gameProfile = readGameProfile(reader);
-    return new this(gameProfile);
+    const profile = readGameProfile(reader);
+    return new this(profile);
   }
   write(writer: Writer) {
-    writeGameProfile(writer, this.gameProfile);
+    writeGameProfile(writer, this.profile);
   }
-  handle(handler: ClientLoginHandler) {
-    return handler.handleGameProfile?.(this);
+  async handle(handler: ClientLoginHandler) {
+    await handler.handleGameProfile?.(this);
   }
 }
 
@@ -76,8 +86,8 @@ export class ClientboundLoginCompressionPacket implements Packet<ClientLoginHand
   write(writer: Writer) {
     writer.writeVarInt(this.compressionThreshold);
   }
-  handle(handler: ClientLoginHandler) {
-    return handler.handleLoginCompression?.(this);
+  async handle(handler: ClientLoginHandler) {
+    await handler.handleLoginCompression?.(this);
   }
 }
 
@@ -98,7 +108,7 @@ export class ClientboundCustomQueryPacket implements Packet<ClientLoginHandler> 
     writeResourceLocation(writer, this.identifier);
     writer.write(this.data);
   }
-  handle(handler: ClientLoginHandler) {
-    return handler.handleCustomQuery?.(this);
+  async handle(handler: ClientLoginHandler) {
+    await handler.handleCustomQuery?.(this);
   }
 }
