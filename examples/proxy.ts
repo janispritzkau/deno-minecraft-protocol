@@ -1,5 +1,6 @@
 // deno-lint-ignore-file
 
+import * as flags from "https://deno.land/std@0.166.0/flags/mod.ts";
 import * as C from "https://deno.land/std@0.166.0/fmt/colors.ts";
 import { equals } from "https://deno.land/std@0.166.0/bytes/equals.ts";
 import { assertEquals } from "https://deno.land/std@0.166.0/testing/asserts.ts";
@@ -199,9 +200,20 @@ async function handleConnection(conn: Connection, address: ServerAddress, netAdd
   if (!client.closed) client.close();
 }
 
-async function runProxyServer(port = 25566, connectAddress = "localhost:25565") {
-  const serverAddress = parseServerAddress(connectAddress);
-  const listener = Deno.listen({ hostname: "0.0.0.0", port });
+async function runProxyServer() {
+  const args = flags.parse(Deno.args, {
+    string: ["hostname", "port"],
+    default: { hostname: "0.0.0.0", port: 25566 },
+  });
+
+  const hostname = args.hostname;
+  const port = Number(args.port);
+
+  const address = args._[0]?.toString() ?? "localhost:25565";
+  if (!address) throw new Error("No address specified");
+
+  const serverAddress = parseServerAddress(address);
+  const listener = Deno.listen({ hostname, port });
 
   for await (const denoConn of listener) {
     const remoteNetAddr = denoConn.remoteAddr as Deno.NetAddr;
