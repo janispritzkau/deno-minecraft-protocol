@@ -2,14 +2,8 @@
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { Packet, PacketHandler } from "minecraft/network/packet.ts";
 import { Component } from "../../../chat/component.ts";
-import {
-  GameProfile,
-  readGameProfile,
-  readResourceLocation,
-  ResourceLocation,
-  writeGameProfile,
-  writeResourceLocation,
-} from "../types.ts";
+import { GameProfile, readGameProfile, writeGameProfile } from "../types.ts";
+import { ResourceLocation } from "../../../core/resource_location.ts";
 
 export interface ClientLoginHandler extends PacketHandler {
   handleLoginDisconnect?(packet: ClientboundLoginDisconnectPacket): Promise<void>;
@@ -37,18 +31,18 @@ export class ClientboundLoginDisconnectPacket implements Packet<ClientLoginHandl
 
 export class ClientboundHelloPacket implements Packet<ClientLoginHandler> {
   constructor(
-    public serverId: string,
+    public serverId: Uint8Array,
     public publicKey: Uint8Array,
     public nonce: Uint8Array,
   ) {}
   static read(reader: Reader) {
-    const serverId = reader.readString(20);
+    const serverId = reader.readByteArray(20);
     const publicKey = reader.readByteArray();
     const nonce = reader.readByteArray();
     return new this(serverId, publicKey, nonce);
   }
   write(writer: Writer) {
-    writer.writeString(this.serverId);
+    writer.writeByteArray(this.serverId);
     writer.writeByteArray(this.publicKey);
     writer.writeByteArray(this.nonce);
   }
@@ -97,13 +91,13 @@ export class ClientboundCustomQueryPacket implements Packet<ClientLoginHandler> 
   ) {}
   static read(reader: Reader) {
     const transactionId = reader.readVarInt();
-    const identifier = readResourceLocation(reader);
+    const identifier = ResourceLocation.from(reader.readString(32767));
     const data = reader.read(reader.unreadBytes);
     return new this(transactionId, identifier, data);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.transactionId);
-    writeResourceLocation(writer, this.identifier);
+    writer.writeString(this.identifier.toString());
     writer.write(this.data);
   }
   async handle(handler: ClientLoginHandler) {

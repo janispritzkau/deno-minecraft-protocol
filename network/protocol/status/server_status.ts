@@ -1,10 +1,6 @@
 import * as json from "../../../utils/json.ts";
 import { Component } from "../../../chat/component.ts";
 
-// Required for the proxy to ensure that the serialized format remains the same when the same object is passed on.
-// JSON with extra whitespace would cause problems too.
-const ORIGINAL_STATUS_JSON = new WeakMap<ServerStatus, unknown>();
-
 export type ServerStatus = {
   description?: Component;
   players?: {
@@ -25,7 +21,6 @@ export type ServerStatus = {
 export function deserializeServerStatus(value: unknown): ServerStatus {
   json.assertIsObject(value);
   const status: ServerStatus = {};
-  ORIGINAL_STATUS_JSON.set(status, value);
   if ("description" in value) status.description = Component.deserialize(value.description);
   if ("players" in value) {
     const players = json.asObject(value.players);
@@ -45,7 +40,7 @@ export function deserializeServerStatus(value: unknown): ServerStatus {
 }
 
 export function serializeServerStatus(status: ServerStatus): unknown {
-  return ORIGINAL_STATUS_JSON.get(status) ?? {
+  return {
     ...status,
     description: status.description?.serialize(),
   };

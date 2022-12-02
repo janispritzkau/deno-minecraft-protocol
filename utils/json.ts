@@ -9,7 +9,7 @@ export function asArray(value: unknown): unknown[] {
 }
 
 export function asString(value: unknown): string {
-  if (!isJsonPrimitive(value)) {
+  if (!isPrimitive(value)) {
     throw new Error("Cannot convert value into string");
   }
   return value.toString();
@@ -37,11 +37,11 @@ export function assertIsObject(value: unknown): asserts value is Record<string, 
 }
 
 export function assertIsArray(value: unknown): asserts value is unknown[] {
-  if (value instanceof Array) {
+  if (!(value instanceof Array)) {
     throw new Error("Expected value to be an array");
   }
 }
 
-export function isJsonPrimitive(value: unknown): value is string | number | boolean {
+export function isPrimitive(value: unknown): value is string | number | boolean {
   return typeof value == "string" || typeof value == "number" || typeof value == "boolean";
 }

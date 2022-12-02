@@ -9,6 +9,8 @@ import {
   ClickType,
   clickTypeEnum,
   createEnumMapper,
+  Difficulty,
+  difficultyEnum,
   Direction,
   directionEnum,
   HumanoidArm,
@@ -17,7 +19,6 @@ import {
   interactionHandEnum,
   ItemStack,
   LastSeenMessagesUpdate,
-  MessageSignature,
   MobEffect,
   mobEffectEnum,
   PlayerAction,
@@ -26,16 +27,14 @@ import {
   readBlockPos,
   readItemStack,
   readLastSeenMessagesUpdate,
-  readResourceLocation,
   RecipeBookType,
   recipeBookTypeEnum,
-  ResourceLocation,
   writeArgumentSignatures,
   writeBlockPos,
   writeItemStack,
   writeLastSeenMessagesUpdate,
-  writeResourceLocation,
 } from "../types.ts";
+import { ResourceLocation } from "../../../core/resource_location.ts";
 import { Uuid } from "../../../core/uuid.ts";
 
 export interface ServerGameHandler extends PacketHandler {
@@ -94,14 +93,14 @@ export interface ServerGameHandler extends PacketHandler {
 
 export class ServerboundAcceptTeleportationPacket implements Packet<ServerGameHandler> {
   constructor(
-    public id: number,
+    public teleportId: number,
   ) {}
   static read(reader: Reader) {
-    const id = reader.readVarInt();
-    return new this(id);
+    const teleportId = reader.readVarInt();
+    return new this(teleportId);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.id);
+    writer.writeVarInt(this.teleportId);
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleAcceptTeleportation?.(this);
@@ -129,14 +128,14 @@ export class ServerboundBlockEntityTagQueryPacket implements Packet<ServerGameHa
 
 export class ServerboundChangeDifficultyPacket implements Packet<ServerGameHandler> {
   constructor(
-    public difficulty: number,
+    public difficulty: Difficulty,
   ) {}
   static read(reader: Reader) {
-    const difficulty = reader.readUnsignedByte();
+    const difficulty = difficultyEnum.fromId(reader.readUnsignedByte());
     return new this(difficulty);
   }
   write(writer: Writer) {
-    writer.writeUnsignedByte(this.difficulty);
+    writer.writeUnsignedByte(difficultyEnum.toId(this.difficulty));
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleChangeDifficulty?.(this);
@@ -162,7 +161,7 @@ export class ServerboundChatAckPacket implements Packet<ServerGameHandler> {
 export class ServerboundChatCommandPacket implements Packet<ServerGameHandler> {
   constructor(
     public command: string,
-    public timeStamp: bigint,
+    public timestamp: bigint,
     public salt: bigint,
     public argumentSignatures: ArgumentSignatures,
     public signedPreview: boolean,
@@ -170,16 +169,16 @@ export class ServerboundChatCommandPacket implements Packet<ServerGameHandler> {
   ) {}
   static read(reader: Reader) {
     const command = reader.readString(256);
-    const timeStamp = reader.readLong();
+    const timestamp = reader.readLong();
     const salt = reader.readLong();
     const argumentSignatures = readArgumentSignatures(reader);
     const signedPreview = reader.readBoolean();
     const lastSeenMessages = readLastSeenMessagesUpdate(reader);
-    return new this(command, timeStamp, salt, argumentSignatures, signedPreview, lastSeenMessages);
+    return new this(command, timestamp, salt, argumentSignatures, signedPreview, lastSeenMessages);
   }
   write(writer: Writer) {
     writer.writeString(this.command);
-    writer.writeLong(this.timeStamp);
+    writer.writeLong(this.timestamp);
     writer.writeLong(this.salt);
     writeArgumentSignatures(writer, this.argumentSignatures);
     writer.writeBoolean(this.signedPreview);
@@ -190,10 +189,12 @@ export class ServerboundChatCommandPacket implements Packet<ServerGameHandler> {
   }
 }
 
+export type MessageSignature = Uint8Array;
+
 export class ServerboundChatPacket implements Packet<ServerGameHandler> {
   constructor(
     public message: string,
-    public timeStamp: bigint,
+    public timestamp: bigint,
     public salt: bigint,
     public signature: MessageSignature,
     public signedPreview: boolean,
@@ -201,16 +202,16 @@ export class ServerboundChatPacket implements Packet<ServerGameHandler> {
   ) {}
   static read(reader: Reader) {
     const message = reader.readString(256);
-    const timeStamp = reader.readLong();
+    const timestamp = reader.readLong();
     const salt = reader.readLong();
     const signature = reader.readByteArray();
     const signedPreview = reader.readBoolean();
     const lastSeenMessages = readLastSeenMessagesUpdate(reader);
-    return new this(message, timeStamp, salt, signature, signedPreview, lastSeenMessages);
+    return new this(message, timestamp, salt, signature, signedPreview, lastSeenMessages);
   }
   write(writer: Writer) {
     writer.writeString(this.message);
-    writer.writeLong(this.timeStamp);
+    writer.writeLong(this.timestamp);
     writer.writeLong(this.salt);
     writer.writeByteArray(this.signature);
     writer.writeBoolean(this.signedPreview);
@@ -410,12 +411,12 @@ export class ServerboundCustomPayloadPacket implements Packet<ServerGameHandler>
     public data: Uint8Array,
   ) {}
   static read(reader: Reader) {
-    const identifier = readResourceLocation(reader);
+    const identifier = ResourceLocation.from(reader.readString(32767));
     const data = reader.read(reader.unreadBytes);
     return new this(identifier, data);
   }
   write(writer: Writer) {
-    writeResourceLocation(writer, this.identifier);
+    writer.writeString(this.identifier.toString());
     writer.write(this.data);
   }
   async handle(handler: ServerGameHandler) {
@@ -753,13 +754,13 @@ export class ServerboundPlaceRecipePacket implements Packet<ServerGameHandler> {
   ) {}
   static read(reader: Reader) {
     const containerId = reader.readByte();
-    const recipe = readResourceLocation(reader);
+    const recipe = ResourceLocation.from(reader.readString(32767));
     const shiftDown = reader.readBoolean();
     return new this(containerId, recipe, shiftDown);
   }
   write(writer: Writer) {
     writer.writeByte(this.containerId);
-    writeResourceLocation(writer, this.recipe);
+    writer.writeString(this.recipe.toString());
     writer.writeBoolean(this.shiftDown);
   }
   async handle(handler: ServerGameHandler) {
@@ -858,19 +859,19 @@ export class ServerboundPlayerInputPacket implements Packet<ServerGameHandler> {
   constructor(
     public xxa: number,
     public zza: number,
-    public fields: { isJumping: boolean; isShiftKeyDown: boolean },
+    public flags: { isJumping: boolean; isShiftKeyDown: boolean },
   ) {}
   static read(reader: Reader) {
     const xxa = reader.readFloat();
     const zza = reader.readFloat();
-    const flags = reader.readByte();
-    const fields = { isJumping: (flags & 0x1) > 0, isShiftKeyDown: (flags & 0x2) > 0 };
-    return new this(xxa, zza, fields);
+    const flags1 = reader.readByte();
+    const flags = { isJumping: (flags1 & 0x1) > 0, isShiftKeyDown: (flags1 & 0x2) > 0 };
+    return new this(xxa, zza, flags);
   }
   write(writer: Writer) {
     writer.writeFloat(this.xxa);
     writer.writeFloat(this.zza);
-    writer.writeByte((-this.fields.isJumping & 0x1) | (-this.fields.isShiftKeyDown & 0x2));
+    writer.writeByte((-this.flags.isJumping & 0x1) | (-this.flags.isShiftKeyDown & 0x2));
   }
   async handle(handler: ServerGameHandler) {
     await handler.handlePlayerInput?.(this);
@@ -920,11 +921,11 @@ export class ServerboundRecipeBookSeenRecipePacket implements Packet<ServerGameH
     public recipe: ResourceLocation,
   ) {}
   static read(reader: Reader) {
-    const recipe = readResourceLocation(reader);
+    const recipe = ResourceLocation.from(reader.readString(32767));
     return new this(recipe);
   }
   write(writer: Writer) {
-    writeResourceLocation(writer, this.recipe);
+    writer.writeString(this.recipe.toString());
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleRecipeBookSeenRecipe?.(this);
@@ -984,7 +985,7 @@ export class ServerboundSeenAdvancementsPacket implements Packet<ServerGameHandl
       | { type: "closed_screen" };
     switch (reader.readVarInt()) {
       case 0:
-        result = { type: "opened_tab", tab: readResourceLocation(reader) };
+        result = { type: "opened_tab", tab: ResourceLocation.from(reader.readString(32767)) };
         break;
       case 1:
         result = { type: "closed_screen" };
@@ -999,7 +1000,7 @@ export class ServerboundSeenAdvancementsPacket implements Packet<ServerGameHandl
     switch (this.action.type) {
       case "opened_tab": {
         writer.writeVarInt(0);
-        writeResourceLocation(writer, this.action.tab);
+        writer.writeString(this.action.tab.toString());
         break;
       }
       case "closed_screen": {
@@ -1017,14 +1018,14 @@ export class ServerboundSeenAdvancementsPacket implements Packet<ServerGameHandl
 
 export class ServerboundSelectTradePacket implements Packet<ServerGameHandler> {
   constructor(
-    public item: number,
+    public offerIndex: number,
   ) {}
   static read(reader: Reader) {
-    const item = reader.readVarInt();
-    return new this(item);
+    const offerIndex = reader.readVarInt();
+    return new this(offerIndex);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.item);
+    writer.writeVarInt(this.offerIndex);
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleSelectTrade?.(this);
@@ -1033,19 +1034,19 @@ export class ServerboundSelectTradePacket implements Packet<ServerGameHandler> {
 
 export class ServerboundSetBeaconPacket implements Packet<ServerGameHandler> {
   constructor(
-    public primary: MobEffect | null,
-    public secondary: MobEffect | null,
+    public primaryEffect: MobEffect | null,
+    public secondaryEffect: MobEffect | null,
   ) {}
   static read(reader: Reader) {
-    const primary = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
-    const secondary = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
-    return new this(primary, secondary);
+    const primaryEffect = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
+    const secondaryEffect = reader.readBoolean() ? mobEffectEnum.fromId(reader.readVarInt()) : null;
+    return new this(primaryEffect, secondaryEffect);
   }
   write(writer: Writer) {
-    writer.writeBoolean(this.primary != null);
-    if (this.primary != null) writer.writeVarInt(mobEffectEnum.toId(this.primary));
-    writer.writeBoolean(this.secondary != null);
-    if (this.secondary != null) writer.writeVarInt(mobEffectEnum.toId(this.secondary));
+    writer.writeBoolean(this.primaryEffect != null);
+    if (this.primaryEffect != null) writer.writeVarInt(mobEffectEnum.toId(this.primaryEffect));
+    writer.writeBoolean(this.secondaryEffect != null);
+    if (this.secondaryEffect != null) writer.writeVarInt(mobEffectEnum.toId(this.secondaryEffect));
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleSetBeacon?.(this);
@@ -1077,23 +1078,21 @@ export class ServerboundSetCommandBlockPacket implements Packet<ServerGameHandle
     public pos: BlockPos,
     public command: string,
     public mode: CommandBlockMode,
-    public fields: { trackOutput: boolean; conditional: boolean; automatic: boolean },
+    public flags: { trackOutput: boolean; conditional: boolean; automatic: boolean },
   ) {}
   static read(reader: Reader) {
     const pos = readBlockPos(reader);
     const command = reader.readString();
     const mode = commandBlockModeEnum.fromId(reader.readVarInt());
-    const flags = reader.readByte();
-    const fields = { trackOutput: (flags & 0x1) > 0, conditional: (flags & 0x2) > 0, automatic: (flags & 0x4) > 0 };
-    return new this(pos, command, mode, fields);
+    const flags1 = reader.readByte();
+    const flags = { trackOutput: (flags1 & 0x1) > 0, conditional: (flags1 & 0x2) > 0, automatic: (flags1 & 0x4) > 0 };
+    return new this(pos, command, mode, flags);
   }
   write(writer: Writer) {
     writeBlockPos(writer, this.pos);
     writer.writeString(this.command);
     writer.writeVarInt(commandBlockModeEnum.toId(this.mode));
-    writer.writeByte(
-      (-this.fields.trackOutput & 0x1) | (-this.fields.conditional & 0x2) | (-this.fields.automatic & 0x4),
-    );
+    writer.writeByte((-this.flags.trackOutput & 0x1) | (-this.flags.conditional & 0x2) | (-this.flags.automatic & 0x4));
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleSetCommandBlock?.(this);
@@ -1156,18 +1155,18 @@ export class ServerboundSetJigsawBlockPacket implements Packet<ServerGameHandler
   ) {}
   static read(reader: Reader) {
     const pos = readBlockPos(reader);
-    const name = readResourceLocation(reader);
-    const target = readResourceLocation(reader);
-    const pool = readResourceLocation(reader);
+    const name = ResourceLocation.from(reader.readString(32767));
+    const target = ResourceLocation.from(reader.readString(32767));
+    const pool = ResourceLocation.from(reader.readString(32767));
     const finalState = reader.readString();
     const joint = jigsawBlockJointTypeEnum.fromId(reader.readVarInt());
     return new this(pos, name, target, pool, finalState, joint);
   }
   write(writer: Writer) {
     writeBlockPos(writer, this.pos);
-    writeResourceLocation(writer, this.name);
-    writeResourceLocation(writer, this.target);
-    writeResourceLocation(writer, this.pool);
+    writer.writeString(this.name.toString());
+    writer.writeString(this.target.toString());
+    writer.writeString(this.pool.toString());
     writer.writeString(this.finalState);
     writer.writeVarInt(jigsawBlockJointTypeEnum.toId(this.joint));
   }
@@ -1301,14 +1300,14 @@ export class ServerboundSwingPacket implements Packet<ServerGameHandler> {
 
 export class ServerboundTeleportToEntityPacket implements Packet<ServerGameHandler> {
   constructor(
-    public uuid: Uuid,
+    public entityUuid: Uuid,
   ) {}
   static read(reader: Reader) {
-    const uuid = Uuid.from(reader.read(16));
-    return new this(uuid);
+    const entityUuid = Uuid.from(reader.read(16));
+    return new this(entityUuid);
   }
   write(writer: Writer) {
-    writer.write(this.uuid.bytes());
+    writer.write(this.entityUuid.bytes());
   }
   async handle(handler: ServerGameHandler) {
     await handler.handleTeleportToEntity?.(this);
@@ -1320,7 +1319,7 @@ export type BlockHitResult = {
   direction: Direction;
   /** Position relative to the block's origin. */
   location: { x: number; y: number; z: number };
-  inside: boolean;
+  isInside: boolean;
 };
 
 export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
@@ -1335,7 +1334,7 @@ export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
       blockPos: readBlockPos(reader),
       direction: directionEnum.fromId(reader.readVarInt()),
       location: { x: reader.readFloat(), y: reader.readFloat(), z: reader.readFloat() },
-      inside: reader.readBoolean(),
+      isInside: reader.readBoolean(),
     };
     const sequence = reader.readVarInt();
     return new this(hand, blockHit, sequence);
@@ -1347,7 +1346,7 @@ export class ServerboundUseItemOnPacket implements Packet<ServerGameHandler> {
     writer.writeFloat(this.blockHit.location.x);
     writer.writeFloat(this.blockHit.location.y);
     writer.writeFloat(this.blockHit.location.z);
-    writer.writeBoolean(this.blockHit.inside);
+    writer.writeBoolean(this.blockHit.isInside);
     writer.writeVarInt(this.sequence);
   }
   async handle(handler: ServerGameHandler) {

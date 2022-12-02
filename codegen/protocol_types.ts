@@ -1,4 +1,5 @@
 import { type } from "./protocol.ts";
+import { BlockEntityType, Item } from "./registry_types.ts";
 import { AliasedType, Type } from "./type.ts";
 import {
   BitFlags,
@@ -6,7 +7,9 @@ import {
   Byte,
   ByteArray,
   Component,
+  Custom,
   CustomStruct,
+  Date,
   Double,
   Enum,
   Float,
@@ -19,6 +22,7 @@ import {
   Nbt,
   Optional,
   Packed,
+  Serializable,
   Short,
   String,
   Struct,
@@ -27,9 +31,14 @@ import {
   Uuid,
   VarInt,
 } from "./types.ts";
-import { BlockEntityType, ChatType, Item } from "./registry_types.ts";
 
-export const ResourceLocation = type("ResourceLocation", String(32767));
+export const ResourceLocation = Serializable(
+  "ResourceLocation",
+  String(32767),
+  (value) => `ResourceLocation.from(${value})`,
+  (value) => `${value}.toString()`,
+);
+
 export const BlockPos = type("BlockPos", Packed(Long, [26, 26, 12], (x, z, y) => ({ x, y, z })));
 export const BlockState = type("BlockState", VarInt);
 
@@ -44,14 +53,51 @@ export const Difficulty = type("Difficulty")(Enum([
   "easy",
   "normal",
   "hard",
-]));
+], UnsignedByte));
 
-export const GameMode = type("GameMode")(Enum([
-  "survival",
-  "creative",
-  "adventure",
-  "spectator",
-]));
+const GameModeWith = (type: Type) => {
+  return Enum([
+    "survival",
+    "creative",
+    "adventure",
+    "spectator",
+  ], type);
+};
+
+const NullableGameModeWith = (type: Type) => {
+  const gameModeEnum = GameModeWith(type).alias("GameMode");
+  return Custom(Optional(gameModeEnum), (context) => {
+    const { reader } = context;
+    const gameMode = context.declare("gameMode", Optional(gameModeEnum).definition, "null");
+    // TODO: there should be a better way
+    context.statement(`const bytes = ${reader}.read(${reader}.unreadBytes)`);
+    context.statement(`${reader} = new Reader(bytes)`);
+    context.statement(
+      `if (${
+        context.capture(() => type.read(context), { reader: "new Reader(bytes)" }).value
+      } != -1) {\n${
+        context.capture(() => {
+          context.statement(`${gameMode.use()} = ${gameModeEnum.read(context)}`);
+        }).statementBlock
+      }}`,
+    );
+    context.statement(`else {\n${type.read(context)};\n}`);
+    return gameMode.use();
+  }, (context, value) => {
+    context.statement(
+      `if (${value} != null) {\n${
+        context.capture(() => gameModeEnum.write(context, value)).statementBlock
+      }}`,
+    );
+    context.statement(
+      `else {\n${context.capture(() => type.write(context, "-1")).statementBlock}}`,
+    );
+  });
+};
+
+export const GameMode = type("GameMode", GameModeWith(VarInt));
+export const GameModeByte = GameModeWith(Byte).alias("GameMode");
+export const NullableGameModeByte = NullableGameModeWith(Byte).alias("NullableGameMode");
 
 export const Direction = type("Direction")(Enum([
   "down",
@@ -97,22 +143,20 @@ export const GameProfile = type("GameProfile")(Struct({
 }));
 
 export const ProfilePublicKey = type("ProfilePublicKey")(Struct({
-  expiresAt: Long,
+  expiresAt: Date,
   key: ByteArray(),
   keySignature: ByteArray(4096),
 }));
 
+export const ChunkBlockEntity = type("ChunkBlockEntity")(Merge(
+  Packed(Byte, [4, 4], (x, z) => ({ x, z })),
+  Struct({ y: Short, type: BlockEntityType, tag: Nbt }),
+));
+
 export const ChunkData = type("ChunkData")(Struct({
   heightmaps: Nbt,
-  buffer: ByteArray(),
-  blockEntitiesData: List(Merge(
-    Packed(Byte, [4, 4], (x, z) => ({ x, z })),
-    Struct({
-      y: Short,
-      type: BlockEntityType,
-      tag: Nbt,
-    }),
-  )),
+  data: ByteArray(),
+  blockEntities: List(ChunkBlockEntity),
 }));
 
 export const LightData = type("LightData")(Struct({
@@ -125,13 +169,14 @@ export const LightData = type("LightData")(Struct({
   blockUpdates: List(ByteArray(2048)),
 }));
 
+// TODO: remove namespace prefix
 const PositionSource = type("PositionSource")(TaggedUnion("type", String(), {
   "minecraft:block": Struct({ pos: BlockPos }),
-  "minecraft:entity": Struct({ id: VarInt, yOffset: Float }),
+  "minecraft:entity": Struct({ entityId: VarInt, yOffset: Float }),
 }));
 
 const BlockParticleOptions = Struct({
-  state: BlockState,
+  blockState: BlockState,
 });
 
 const DustParticleOptions = Struct({
@@ -420,10 +465,8 @@ export const CommandNode = type("CommandNode")(CustomStruct({
   }}`);
 }));
 
-export const MessageSignature = ByteArray().alias("MessageSignature");
-
 export const SignedMessageHeader = type("SignedMessageHeader")(Struct({
-  previousSignature: Optional(MessageSignature),
+  previousSignature: Optional(ByteArray()),
   sender: Uuid,
 }));
 
@@ -432,11 +475,9 @@ export const ChatMessageContent = type("ChatMessageContent")(Struct({
   decorated: Optional(Component),
 }));
 
-export const Instant = type("Instant", Long);
-
 export const LastSeenMessagesEntry = type("LastSeenMessagesEntry")(Struct({
   profileId: Uuid,
-  lastSignature: Optional(ByteArray().alias("MessageSignature")),
+  lastSignature: ByteArray(),
 }));
 
 export const LastSeenMessagesUpdate = type("LastSeenMessagesUpdate")(Struct({
@@ -446,7 +487,7 @@ export const LastSeenMessagesUpdate = type("LastSeenMessagesUpdate")(Struct({
 
 export const SignedMessageBody = type("SignedMessageBody")(Struct({
   content: ChatMessageContent,
-  timeStamp: Instant,
+  timestamp: Long,
   salt: Long,
   lastSeen: List(LastSeenMessagesEntry),
 }));
@@ -457,23 +498,9 @@ export const FilterMask = type("FilterMask")(TaggedUnion("type", VarInt, {
   partially_filtered: Struct({ filter: LongArray().alias("BitSet") }),
 }));
 
-export const PlayerChatMessage = type("PlayerChatMessage")(Struct({
-  signedHeader: SignedMessageHeader,
-  headerSignature: MessageSignature,
-  signedBody: SignedMessageBody,
-  unsignedContent: Optional(Component),
-  filterMask: FilterMask,
-}));
-
-export const ChatTypeBound = type("ChatTypeBound")(Struct({
-  chatType: ChatType,
-  name: Component,
-  targetName: Optional(Component),
-}));
-
 export const ArgumentSignatureEntry = type("ArgumentSignatureEntry")(Struct({
   name: String(16),
-  signature: MessageSignature,
+  signature: ByteArray(),
 }));
 
 export const ArgumentSignatures = type("ArgumentSignatures", List(ArgumentSignatureEntry));
@@ -530,27 +557,27 @@ export const RecipeBookType = type("RecipeBookType")(Enum([
   "smoker",
 ]));
 
-export const ChatFormatting = type("ChatFormatting")(Enum({
-  "black": 0,
-  "dark_blue": 1,
-  "dark_green": 2,
-  "dark_aqua": 3,
-  "dark_red": 4,
-  "dark_purple": 5,
-  "gold": 6,
-  "gray": 7,
-  "dark_gray": 8,
-  "blue": 9,
-  "green": 10,
-  "aqua": 11,
-  "red": 12,
-  "light_purple": 13,
-  "yellow": 14,
-  "white": 15,
-  "obfuscated": 16,
-  "bold": 17,
-  "strikethrough": 18,
-  "underline": 19,
-  "italic": 20,
-  "reset": -1,
-}));
+export const ChatFormatting = type("ChatFormatting")(Enum([
+  "black",
+  "dark_blue",
+  "dark_green",
+  "dark_aqua",
+  "dark_red",
+  "dark_purple",
+  "gold",
+  "gray",
+  "dark_gray",
+  "blue",
+  "green",
+  "aqua",
+  "red",
+  "light_purple",
+  "yellow",
+  "white",
+  "obfuscated",
+  "bold",
+  "strikethrough",
+  "underline",
+  "italic",
+  "reset",
+]));

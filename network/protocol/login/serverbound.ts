@@ -12,18 +12,18 @@ export interface ServerLoginHandler extends PacketHandler {
 
 export class ServerboundHelloPacket implements Packet<ServerLoginHandler> {
   constructor(
-    public name: string,
+    public profileName: string,
     public publicKey: ProfilePublicKey | null,
     public profileId: Uuid | null,
   ) {}
   static read(reader: Reader) {
-    const name = reader.readString(16);
+    const profileName = reader.readString(16);
     const publicKey = reader.readBoolean() ? readProfilePublicKey(reader) : null;
     const profileId = reader.readBoolean() ? Uuid.from(reader.read(16)) : null;
-    return new this(name, publicKey, profileId);
+    return new this(profileName, publicKey, profileId);
   }
   write(writer: Writer) {
-    writer.writeString(this.name);
+    writer.writeString(this.profileName);
     writer.writeBoolean(this.publicKey != null);
     if (this.publicKey != null) writeProfilePublicKey(writer, this.publicKey);
     writer.writeBoolean(this.profileId != null);

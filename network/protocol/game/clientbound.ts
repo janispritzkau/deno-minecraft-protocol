@@ -12,7 +12,8 @@ import {
   catVariantEnum,
   ChatFormatting,
   chatFormattingEnum,
-  ChatTypeBound,
+  ChatType,
+  chatTypeEnum,
   ChunkData,
   CommandNode,
   createEnumMapper,
@@ -27,10 +28,10 @@ import {
   entityTypeEnum,
   EquipmentSlot,
   equipmentSlotEnum,
+  FilterMask,
   FrogVariant,
   frogVariantEnum,
   GameMode,
-  gameModeEnum,
   GameProfile,
   GlobalPos,
   InteractionHand,
@@ -41,31 +42,28 @@ import {
   LightData,
   Menu,
   menuEnum,
-  MessageSignature,
   MobEffect,
   mobEffectEnum,
   PaintingVariant,
   paintingVariantEnum,
   particleTypeEnum,
-  PlayerChatMessage,
   PositionSource,
   ProfilePublicKey,
   readBlockPos,
   readBlockState,
-  readChatTypeBound,
   readChunkData,
   readCommandNode,
+  readFilterMask,
   readGameProfile,
   readGlobalPos,
   readItemStack,
   readLightData,
-  readPlayerChatMessage,
   readPositionSource,
   readProfilePublicKey,
-  readResourceLocation,
+  readSignedMessageBody,
   readSignedMessageHeader,
   RecipeBookType,
-  ResourceLocation,
+  SignedMessageBody,
   SignedMessageHeader,
   SoundEvent,
   soundEventEnum,
@@ -78,22 +76,22 @@ import {
   villagerTypeEnum,
   writeBlockPos,
   writeBlockState,
-  writeChatTypeBound,
   writeChunkData,
   writeCommandNode,
+  writeFilterMask,
   writeGameProfile,
   writeGlobalPos,
   writeItemStack,
   writeLightData,
-  writePlayerChatMessage,
   writePositionSource,
   writeProfilePublicKey,
-  writeResourceLocation,
+  writeSignedMessageBody,
   writeSignedMessageHeader,
 } from "../types.ts";
 import { Uuid } from "../../../core/uuid.ts";
 import { CompoundTag } from "minecraft/nbt/tag.ts";
 import { Component } from "../../../chat/component.ts";
+import { ResourceLocation } from "../../../core/resource_location.ts";
 
 export interface ClientGameHandler extends PacketHandler {
   handleAddEntity?(packet: ClientboundAddEntityPacket): Promise<void>;
@@ -595,7 +593,7 @@ export class ClientboundBlockUpdatePacket implements Packet<ClientGameHandler> {
   }
 }
 
-export type BossBarOperation =
+export type BossBarAction =
   | {
     type: "add";
     name: Component;
@@ -636,13 +634,12 @@ const bossBarOverlayEnum = createEnumMapper<BossBarOverlay>({
 
 export class ClientboundBossEventPacket implements Packet<ClientGameHandler> {
   constructor(
-    /** Identifier unique to the boss bar. */
-    public id: Uuid,
-    public operation: BossBarOperation,
+    public bossBarId: Uuid,
+    public action: BossBarAction,
   ) {}
   static read(reader: Reader) {
-    const id = Uuid.from(reader.read(16));
-    let result: BossBarOperation;
+    const bossBarId = Uuid.from(reader.read(16));
+    let result: BossBarAction;
     switch (reader.readVarInt()) {
       case 0: {
         const type = "add";
@@ -693,21 +690,20 @@ export class ClientboundBossEventPacket implements Packet<ClientGameHandler> {
       default:
         throw new Error("Invalid tag id");
     }
-    const operation = result;
-    return new this(id, operation);
+    const action = result;
+    return new this(bossBarId, action);
   }
   write(writer: Writer) {
-    writer.write(this.id.bytes());
-    switch (this.operation.type) {
+    writer.write(this.bossBarId.bytes());
+    switch (this.action.type) {
       case "add": {
         writer.writeVarInt(0);
-        writer.writeJson(this.operation.name.serialize());
-        writer.writeFloat(this.operation.progress);
-        writer.writeVarInt(bossBarColorEnum.toId(this.operation.color));
-        writer.writeVarInt(bossBarOverlayEnum.toId(this.operation.overlay));
+        writer.writeJson(this.action.name.serialize());
+        writer.writeFloat(this.action.progress);
+        writer.writeVarInt(bossBarColorEnum.toId(this.action.color));
+        writer.writeVarInt(bossBarOverlayEnum.toId(this.action.overlay));
         writer.writeByte(
-          (-this.operation.darkenScreen & 0x1) | (-this.operation.playMusic & 0x2) |
-            (-this.operation.createWorldFog & 0x4),
+          (-this.action.darkenScreen & 0x1) | (-this.action.playMusic & 0x2) | (-this.action.createWorldFog & 0x4),
         );
         break;
       }
@@ -717,25 +713,24 @@ export class ClientboundBossEventPacket implements Packet<ClientGameHandler> {
       }
       case "update_progress": {
         writer.writeVarInt(2);
-        writer.writeFloat(this.operation.progress);
+        writer.writeFloat(this.action.progress);
         break;
       }
       case "update_name": {
         writer.writeVarInt(3);
-        writer.writeJson(this.operation.name.serialize());
+        writer.writeJson(this.action.name.serialize());
         break;
       }
       case "update_style": {
         writer.writeVarInt(4);
-        writer.writeVarInt(bossBarColorEnum.toId(this.operation.color));
-        writer.writeVarInt(bossBarOverlayEnum.toId(this.operation.overlay));
+        writer.writeVarInt(bossBarColorEnum.toId(this.action.color));
+        writer.writeVarInt(bossBarOverlayEnum.toId(this.action.overlay));
         break;
       }
       case "update_properties": {
         writer.writeVarInt(5);
         writer.writeByte(
-          (-this.operation.darkenScreen & 0x1) | (-this.operation.playMusic & 0x2) |
-            (-this.operation.createWorldFog & 0x4),
+          (-this.action.darkenScreen & 0x1) | (-this.action.playMusic & 0x2) | (-this.action.createWorldFog & 0x4),
         );
         break;
       }
@@ -754,12 +749,12 @@ export class ClientboundChangeDifficultyPacket implements Packet<ClientGameHandl
     public isLocked: boolean,
   ) {}
   static read(reader: Reader) {
-    const difficulty = difficultyEnum.fromId(reader.readVarInt());
+    const difficulty = difficultyEnum.fromId(reader.readUnsignedByte());
     const isLocked = reader.readBoolean();
     return new this(difficulty, isLocked);
   }
   write(writer: Writer) {
-    writer.writeVarInt(difficultyEnum.toId(this.difficulty));
+    writer.writeUnsignedByte(difficultyEnum.toId(this.difficulty));
     writer.writeBoolean(this.isLocked);
   }
   async handle(handler: ClientGameHandler) {
@@ -886,7 +881,7 @@ export class ClientboundContainerSetContentPacket implements Packet<ClientGameHa
     public containerId: number,
     public stateId: number,
     /** The array index corresponds to the slot number. */
-    public items: ItemStack[],
+    public itemSlots: ItemStack[],
     public carriedItem: ItemStack,
   ) {}
   static read(reader: Reader) {
@@ -894,15 +889,15 @@ export class ClientboundContainerSetContentPacket implements Packet<ClientGameHa
     const stateId = reader.readVarInt();
     const list: ItemStack[] = [];
     for (let i = reader.readVarInt(); i--;) list.push(readItemStack(reader));
-    const items = list;
+    const itemSlots = list;
     const carriedItem = readItemStack(reader);
-    return new this(containerId, stateId, items, carriedItem);
+    return new this(containerId, stateId, itemSlots, carriedItem);
   }
   write(writer: Writer) {
     writer.writeUnsignedByte(this.containerId);
     writer.writeVarInt(this.stateId);
-    writer.writeVarInt(this.items.length);
-    for (const item of this.items) writeItemStack(writer, item);
+    writer.writeVarInt(this.itemSlots.length);
+    for (const item of this.itemSlots) writeItemStack(writer, item);
     writeItemStack(writer, this.carriedItem);
   }
   async handle(handler: ClientGameHandler) {
@@ -1012,12 +1007,12 @@ export class ClientboundCustomPayloadPacket implements Packet<ClientGameHandler>
     public data: Uint8Array,
   ) {}
   static read(reader: Reader) {
-    const identifier = readResourceLocation(reader);
+    const identifier = ResourceLocation.from(reader.readString(32767));
     const data = reader.read(reader.unreadBytes);
     return new this(identifier, data);
   }
   write(writer: Writer) {
-    writeResourceLocation(writer, this.identifier);
+    writer.writeString(this.identifier.toString());
     writer.write(this.data);
   }
   async handle(handler: ClientGameHandler) {
@@ -1027,7 +1022,7 @@ export class ClientboundCustomPayloadPacket implements Packet<ClientGameHandler>
 
 export class ClientboundCustomSoundPacket implements Packet<ClientGameHandler> {
   constructor(
-    public name: ResourceLocation,
+    public sound: ResourceLocation,
     public source: SoundSource,
     public x: number,
     public y: number,
@@ -1037,7 +1032,7 @@ export class ClientboundCustomSoundPacket implements Packet<ClientGameHandler> {
     public seed: bigint,
   ) {}
   static read(reader: Reader) {
-    const name = readResourceLocation(reader);
+    const sound = ResourceLocation.from(reader.readString(32767));
     const source = soundSourceEnum.fromId(reader.readVarInt());
     const x = reader.readInt();
     const y = reader.readInt();
@@ -1045,10 +1040,10 @@ export class ClientboundCustomSoundPacket implements Packet<ClientGameHandler> {
     const volume = reader.readFloat();
     const pitch = reader.readFloat();
     const seed = reader.readLong();
-    return new this(name, source, x, y, z, volume, pitch, seed);
+    return new this(sound, source, x, y, z, volume, pitch, seed);
   }
   write(writer: Writer) {
-    writeResourceLocation(writer, this.name);
+    writer.writeString(this.sound.toString());
     writer.writeVarInt(soundSourceEnum.toId(this.source));
     writer.writeInt(this.x);
     writer.writeInt(this.y);
@@ -1064,7 +1059,7 @@ export class ClientboundCustomSoundPacket implements Packet<ClientGameHandler> {
 
 export class ClientboundDeleteChatPacket implements Packet<ClientGameHandler> {
   constructor(
-    public messageSignature: MessageSignature,
+    public messageSignature: Uint8Array,
   ) {}
   static read(reader: Reader) {
     const messageSignature = reader.readByteArray();
@@ -1162,17 +1157,17 @@ export class ClientboundExplodePacket implements Packet<ClientGameHandler> {
 
 export class ClientboundForgetLevelChunkPacket implements Packet<ClientGameHandler> {
   constructor(
-    public x: number,
-    public z: number,
+    public chunkX: number,
+    public chunkZ: number,
   ) {}
   static read(reader: Reader) {
-    const x = reader.readInt();
-    const z = reader.readInt();
-    return new this(x, z);
+    const chunkX = reader.readInt();
+    const chunkZ = reader.readInt();
+    return new this(chunkX, chunkZ);
   }
   write(writer: Writer) {
-    writer.writeInt(this.x);
-    writer.writeInt(this.z);
+    writer.writeInt(this.chunkX);
+    writer.writeInt(this.chunkZ);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleForgetLevelChunk?.(this);
@@ -1306,21 +1301,21 @@ export class ClientboundKeepAlivePacket implements Packet<ClientGameHandler> {
 
 export class ClientboundLevelChunkWithLightPacket implements Packet<ClientGameHandler> {
   constructor(
-    public x: number,
-    public z: number,
+    public chunkX: number,
+    public chunkZ: number,
     public chunkData: ChunkData,
     public lightData: LightData,
   ) {}
   static read(reader: Reader) {
-    const x = reader.readInt();
-    const z = reader.readInt();
+    const chunkX = reader.readInt();
+    const chunkZ = reader.readInt();
     const chunkData = readChunkData(reader);
     const lightData = readLightData(reader);
-    return new this(x, z, chunkData, lightData);
+    return new this(chunkX, chunkZ, chunkData, lightData);
   }
   write(writer: Writer) {
-    writer.writeInt(this.x);
-    writer.writeInt(this.z);
+    writer.writeInt(this.chunkX);
+    writer.writeInt(this.chunkZ);
     writeChunkData(writer, this.chunkData);
     writeLightData(writer, this.lightData);
   }
@@ -1357,8 +1352,8 @@ export class ClientboundLevelEventPacket implements Packet<ClientGameHandler> {
 export type ParticleOptions =
   | { type: "minecraft:ambient_entity_effect" }
   | { type: "minecraft:angry_villager" }
-  | { type: "minecraft:block"; state: BlockState }
-  | { type: "minecraft:block_marker"; state: BlockState }
+  | { type: "minecraft:block"; blockState: BlockState }
+  | { type: "minecraft:block_marker"; blockState: BlockState }
   | { type: "minecraft:bubble" }
   | { type: "minecraft:cloud" }
   | { type: "minecraft:crit" }
@@ -1385,7 +1380,7 @@ export type ParticleOptions =
   | { type: "minecraft:explosion_emitter" }
   | { type: "minecraft:explosion" }
   | { type: "minecraft:sonic_boom" }
-  | { type: "minecraft:falling_dust"; state: BlockState }
+  | { type: "minecraft:falling_dust"; blockState: BlockState }
   | { type: "minecraft:firework" }
   | { type: "minecraft:fishing" }
   | { type: "minecraft:flame" }
@@ -1488,10 +1483,10 @@ export class ClientboundLevelParticlesPacket implements Packet<ClientGameHandler
         result = { type: "minecraft:angry_villager" };
         break;
       case 2:
-        result = { type: "minecraft:block", state: readBlockState(reader) };
+        result = { type: "minecraft:block", blockState: readBlockState(reader) };
         break;
       case 3:
-        result = { type: "minecraft:block_marker", state: readBlockState(reader) };
+        result = { type: "minecraft:block_marker", blockState: readBlockState(reader) };
         break;
       case 4:
         result = { type: "minecraft:bubble" };
@@ -1566,7 +1561,7 @@ export class ClientboundLevelParticlesPacket implements Packet<ClientGameHandler
         result = { type: "minecraft:sonic_boom" };
         break;
       case 25:
-        result = { type: "minecraft:falling_dust", state: readBlockState(reader) };
+        result = { type: "minecraft:falling_dust", blockState: readBlockState(reader) };
         break;
       case 26:
         result = { type: "minecraft:firework" };
@@ -1798,11 +1793,11 @@ export class ClientboundLevelParticlesPacket implements Packet<ClientGameHandler
         break;
       }
       case "minecraft:block": {
-        writeBlockState(writer, this.particle.state);
+        writeBlockState(writer, this.particle.blockState);
         break;
       }
       case "minecraft:block_marker": {
-        writeBlockState(writer, this.particle.state);
+        writeBlockState(writer, this.particle.blockState);
         break;
       }
       case "minecraft:bubble": {
@@ -1880,7 +1875,7 @@ export class ClientboundLevelParticlesPacket implements Packet<ClientGameHandler
         break;
       }
       case "minecraft:falling_dust": {
-        writeBlockState(writer, this.particle.state);
+        writeBlockState(writer, this.particle.blockState);
         break;
       }
       case "minecraft:firework": {
@@ -2100,19 +2095,19 @@ export class ClientboundLevelParticlesPacket implements Packet<ClientGameHandler
 
 export class ClientboundLightUpdatePacket implements Packet<ClientGameHandler> {
   constructor(
-    public x: number,
-    public z: number,
+    public chunkX: number,
+    public chunkZ: number,
     public lightData: LightData,
   ) {}
   static read(reader: Reader) {
-    const x = reader.readVarInt();
-    const z = reader.readVarInt();
+    const chunkX = reader.readVarInt();
+    const chunkZ = reader.readVarInt();
     const lightData = readLightData(reader);
-    return new this(x, z, lightData);
+    return new this(chunkX, chunkZ, lightData);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.x);
-    writer.writeVarInt(this.z);
+    writer.writeVarInt(this.chunkX);
+    writer.writeVarInt(this.chunkZ);
     writeLightData(writer, this.lightData);
   }
   async handle(handler: ClientGameHandler) {
@@ -2120,11 +2115,11 @@ export class ClientboundLightUpdatePacket implements Packet<ClientGameHandler> {
   }
 }
 
-export type GameType = "survival" | "creative" | "adventure" | "spectator";
+const gameModeEnum = createEnumMapper<GameMode>({ "survival": 0, "creative": 1, "adventure": 2, "spectator": 3 });
 
-const gameTypeEnum = createEnumMapper<GameType>({ "survival": 0, "creative": 1, "adventure": 2, "spectator": 3 });
+export type NullableGameMode = GameMode | null;
 
-export type NullableGameType = GameType | null;
+const gameModeEnum1 = createEnumMapper<GameMode>({ "survival": 0, "creative": 1, "adventure": 2, "spectator": 3 });
 
 export type DimensionType = ResourceLocation;
 
@@ -2132,8 +2127,8 @@ export class ClientboundLoginPacket implements Packet<ClientGameHandler> {
   constructor(
     public entityId: number,
     public hardcore: boolean,
-    public gameType: GameType,
-    public previousGameType: NullableGameType,
+    public gameMode: GameMode,
+    public previousGameMode: NullableGameMode,
     public levels: Dimension[],
     public registryHolder: CompoundTag | null,
     public dimensionType: DimensionType,
@@ -2151,22 +2146,22 @@ export class ClientboundLoginPacket implements Packet<ClientGameHandler> {
   static read(reader: Reader) {
     const entityId = reader.readInt();
     const hardcore = reader.readBoolean();
-    const gameType = gameTypeEnum.fromId(reader.readByte());
-    let gameType1: GameType | null = null;
+    const gameMode = gameModeEnum.fromId(reader.readByte());
+    let gameMode1: GameMode | null = null;
     const bytes = reader.read(reader.unreadBytes);
     reader = new Reader(bytes);
     if (new Reader(bytes).readByte() != -1) {
-      gameType1 = gameTypeEnum.fromId(reader.readByte());
+      gameMode1 = gameModeEnum1.fromId(reader.readByte());
     } else {
       reader.readByte();
     }
-    const previousGameType = gameType1;
+    const previousGameMode = gameMode1;
     const list: Dimension[] = [];
-    for (let i = reader.readVarInt(); i--;) list.push(readResourceLocation(reader));
+    for (let i = reader.readVarInt(); i--;) list.push(ResourceLocation.from(reader.readString(32767)));
     const levels = list;
     const registryHolder = reader.readCompoundTag();
-    const dimensionType = readResourceLocation(reader);
-    const dimension = readResourceLocation(reader);
+    const dimensionType = ResourceLocation.from(reader.readString(32767));
+    const dimension = ResourceLocation.from(reader.readString(32767));
     const seed = reader.readLong();
     const maxPlayers = reader.readVarInt();
     const chunkRadius = reader.readVarInt();
@@ -2179,8 +2174,8 @@ export class ClientboundLoginPacket implements Packet<ClientGameHandler> {
     return new this(
       entityId,
       hardcore,
-      gameType,
-      previousGameType,
+      gameMode,
+      previousGameMode,
       levels,
       registryHolder,
       dimensionType,
@@ -2199,17 +2194,17 @@ export class ClientboundLoginPacket implements Packet<ClientGameHandler> {
   write(writer: Writer) {
     writer.writeInt(this.entityId);
     writer.writeBoolean(this.hardcore);
-    writer.writeByte(gameTypeEnum.toId(this.gameType));
-    if (this.previousGameType != null) {
-      writer.writeByte(gameTypeEnum.toId(this.previousGameType));
+    writer.writeByte(gameModeEnum.toId(this.gameMode));
+    if (this.previousGameMode != null) {
+      writer.writeByte(gameModeEnum1.toId(this.previousGameMode));
     } else {
       writer.writeByte(-1);
     }
     writer.writeVarInt(this.levels.length);
-    for (const item of this.levels) writeResourceLocation(writer, item);
+    for (const item of this.levels) writer.writeString(item.toString());
     writer.writeCompoundTag(this.registryHolder);
-    writeResourceLocation(writer, this.dimensionType);
-    writeResourceLocation(writer, this.dimension);
+    writer.writeString(this.dimensionType.toString());
+    writer.writeString(this.dimension.toString());
     writer.writeLong(this.seed);
     writer.writeVarInt(this.maxPlayers);
     writer.writeVarInt(this.chunkRadius);
@@ -2545,18 +2540,18 @@ export class ClientboundOpenBookPacket implements Packet<ClientGameHandler> {
 export class ClientboundOpenScreenPacket implements Packet<ClientGameHandler> {
   constructor(
     public containerId: number,
-    public type: Menu,
+    public menu: Menu,
     public title: Component,
   ) {}
   static read(reader: Reader) {
     const containerId = reader.readVarInt();
-    const type = menuEnum.fromId(reader.readVarInt());
+    const menu = menuEnum.fromId(reader.readVarInt());
     const title = Component.deserialize(reader.readJson());
-    return new this(containerId, type, title);
+    return new this(containerId, menu, title);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.containerId);
-    writer.writeVarInt(menuEnum.toId(this.type));
+    writer.writeVarInt(menuEnum.toId(this.menu));
     writer.writeJson(this.title.serialize());
   }
   async handle(handler: ClientGameHandler) {
@@ -2603,12 +2598,12 @@ export class ClientboundPlaceGhostRecipePacket implements Packet<ClientGameHandl
   ) {}
   static read(reader: Reader) {
     const containerId = reader.readByte();
-    const recipe = readResourceLocation(reader);
+    const recipe = ResourceLocation.from(reader.readString(32767));
     return new this(containerId, recipe);
   }
   write(writer: Writer) {
     writer.writeByte(this.containerId);
-    writeResourceLocation(writer, this.recipe);
+    writer.writeString(this.recipe.toString());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handlePlaceGhostRecipe?.(this);
@@ -2649,7 +2644,7 @@ export class ClientboundPlayerAbilitiesPacket implements Packet<ClientGameHandle
 export class ClientboundPlayerChatHeaderPacket implements Packet<ClientGameHandler> {
   constructor(
     public header: SignedMessageHeader,
-    public headerSignature: MessageSignature,
+    public headerSignature: Uint8Array,
     public bodyDigest: Uint8Array,
   ) {}
   static read(reader: Reader) {
@@ -2668,19 +2663,47 @@ export class ClientboundPlayerChatHeaderPacket implements Packet<ClientGameHandl
   }
 }
 
+export type PlayerChatMessage = {
+  signedHeader: SignedMessageHeader;
+  headerSignature: Uint8Array;
+  signedBody: SignedMessageBody;
+  unsignedContent: Component | null;
+  filterMask: FilterMask;
+};
+
+export type ChatTypeBound = { chatType: ChatType; name: Component; targetName: Component | null };
+
 export class ClientboundPlayerChatPacket implements Packet<ClientGameHandler> {
   constructor(
     public message: PlayerChatMessage,
     public chatType: ChatTypeBound,
   ) {}
   static read(reader: Reader) {
-    const message = readPlayerChatMessage(reader);
-    const chatType = readChatTypeBound(reader);
+    const message = {
+      signedHeader: readSignedMessageHeader(reader),
+      headerSignature: reader.readByteArray(),
+      signedBody: readSignedMessageBody(reader),
+      unsignedContent: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
+      filterMask: readFilterMask(reader),
+    };
+    const chatType = {
+      chatType: chatTypeEnum.fromId(reader.readVarInt()),
+      name: Component.deserialize(reader.readJson()),
+      targetName: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
+    };
     return new this(message, chatType);
   }
   write(writer: Writer) {
-    writePlayerChatMessage(writer, this.message);
-    writeChatTypeBound(writer, this.chatType);
+    writeSignedMessageHeader(writer, this.message.signedHeader);
+    writer.writeByteArray(this.message.headerSignature);
+    writeSignedMessageBody(writer, this.message.signedBody);
+    writer.writeBoolean(this.message.unsignedContent != null);
+    if (this.message.unsignedContent != null) writer.writeJson(this.message.unsignedContent.serialize());
+    writeFilterMask(writer, this.message.filterMask);
+    writer.writeVarInt(chatTypeEnum.toId(this.chatType.chatType));
+    writer.writeJson(this.chatType.name.serialize());
+    writer.writeBoolean(this.chatType.targetName != null);
+    if (this.chatType.targetName != null) writer.writeJson(this.chatType.targetName.serialize());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handlePlayerChat?.(this);
@@ -2690,16 +2713,16 @@ export class ClientboundPlayerChatPacket implements Packet<ClientGameHandler> {
 export class ClientboundPlayerCombatEndPacket implements Packet<ClientGameHandler> {
   constructor(
     public duration: number,
-    public killedId: number,
+    public killerEntityId: number,
   ) {}
   static read(reader: Reader) {
     const duration = reader.readVarInt();
-    const killedId = reader.readInt();
-    return new this(duration, killedId);
+    const killerEntityId = reader.readInt();
+    return new this(duration, killerEntityId);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.duration);
-    writer.writeInt(this.killedId);
+    writer.writeInt(this.killerEntityId);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handlePlayerCombatEnd?.(this);
@@ -2721,18 +2744,18 @@ export class ClientboundPlayerCombatEnterPacket implements Packet<ClientGameHand
 export class ClientboundPlayerCombatKillPacket implements Packet<ClientGameHandler> {
   constructor(
     public playerId: number,
-    public killerId: number,
+    public killerEntityId: number,
     public message: Component,
   ) {}
   static read(reader: Reader) {
     const playerId = reader.readVarInt();
-    const killerId = reader.readInt();
+    const killerEntityId = reader.readInt();
     const message = Component.deserialize(reader.readJson());
-    return new this(playerId, killerId, message);
+    return new this(playerId, killerEntityId, message);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.playerId);
-    writer.writeInt(this.killerId);
+    writer.writeInt(this.killerEntityId);
     writer.writeJson(this.message.serialize());
   }
   async handle(handler: ClientGameHandler) {
@@ -2742,8 +2765,8 @@ export class ClientboundPlayerCombatKillPacket implements Packet<ClientGameHandl
 
 export type PlayerInfoUpdate =
   | {
-    action: "add_player";
-    entries: {
+    type: "add";
+    players: {
       profile: GameProfile;
       gameMode: GameMode;
       latency: number;
@@ -2751,10 +2774,10 @@ export type PlayerInfoUpdate =
       publicKey: ProfilePublicKey | null;
     }[];
   }
-  | { action: "update_game_mode"; entries: { id: Uuid; gameMode: GameMode }[] }
-  | { action: "update_latency"; entries: { id: Uuid; latency: number }[] }
-  | { action: "update_display_name"; entries: { id: Uuid; displayName: Component | null }[] }
-  | { action: "remove_player"; entries: { id: Uuid }[] };
+  | { type: "update_game_mode"; entries: { playerId: Uuid; gameMode: GameMode }[] }
+  | { type: "update_latency"; entries: { playerId: Uuid; latency: number }[] }
+  | { type: "update_display_name"; entries: { playerId: Uuid; displayName: Component | null }[] }
+  | { type: "remove"; playerIds: Uuid[] };
 
 export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
   constructor(
@@ -2764,7 +2787,7 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
     let result: PlayerInfoUpdate;
     switch (reader.readVarInt()) {
       case 0: {
-        const action = "add_player";
+        const type = "add";
         const list: {
           profile: GameProfile;
           gameMode: GameMode;
@@ -2781,44 +2804,44 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
             publicKey: reader.readBoolean() ? readProfilePublicKey(reader) : null,
           });
         }
-        result = { action, entries: list };
+        result = { type, players: list };
         break;
       }
       case 1: {
-        const action = "update_game_mode";
-        const list: { id: Uuid; gameMode: GameMode }[] = [];
+        const type = "update_game_mode";
+        const list: { playerId: Uuid; gameMode: GameMode }[] = [];
         for (let i = reader.readVarInt(); i--;) {
-          list.push({ id: Uuid.from(reader.read(16)), gameMode: gameModeEnum.fromId(reader.readVarInt()) });
+          list.push({ playerId: Uuid.from(reader.read(16)), gameMode: gameModeEnum.fromId(reader.readVarInt()) });
         }
-        result = { action, entries: list };
+        result = { type, entries: list };
         break;
       }
       case 2: {
-        const action = "update_latency";
-        const list: { id: Uuid; latency: number }[] = [];
+        const type = "update_latency";
+        const list: { playerId: Uuid; latency: number }[] = [];
         for (let i = reader.readVarInt(); i--;) {
-          list.push({ id: Uuid.from(reader.read(16)), latency: reader.readVarInt() });
+          list.push({ playerId: Uuid.from(reader.read(16)), latency: reader.readVarInt() });
         }
-        result = { action, entries: list };
+        result = { type, entries: list };
         break;
       }
       case 3: {
-        const action = "update_display_name";
-        const list: { id: Uuid; displayName: Component | null }[] = [];
+        const type = "update_display_name";
+        const list: { playerId: Uuid; displayName: Component | null }[] = [];
         for (let i = reader.readVarInt(); i--;) {
           list.push({
-            id: Uuid.from(reader.read(16)),
+            playerId: Uuid.from(reader.read(16)),
             displayName: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
           });
         }
-        result = { action, entries: list };
+        result = { type, entries: list };
         break;
       }
       case 4: {
-        const action = "remove_player";
-        const list: { id: Uuid }[] = [];
-        for (let i = reader.readVarInt(); i--;) list.push({ id: Uuid.from(reader.read(16)) });
-        result = { action, entries: list };
+        const type = "remove";
+        const list: Uuid[] = [];
+        for (let i = reader.readVarInt(); i--;) list.push(Uuid.from(reader.read(16)));
+        result = { type, playerIds: list };
         break;
       }
       default:
@@ -2828,11 +2851,11 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
     return new this(update);
   }
   write(writer: Writer) {
-    switch (this.update.action) {
-      case "add_player": {
+    switch (this.update.type) {
+      case "add": {
         writer.writeVarInt(0);
-        writer.writeVarInt(this.update.entries.length);
-        for (const item of this.update.entries) {
+        writer.writeVarInt(this.update.players.length);
+        for (const item of this.update.players) {
           writeGameProfile(writer, item.profile);
           writer.writeVarInt(gameModeEnum.toId(item.gameMode));
           writer.writeVarInt(item.latency);
@@ -2847,7 +2870,7 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
         writer.writeVarInt(1);
         writer.writeVarInt(this.update.entries.length);
         for (const item of this.update.entries) {
-          writer.write(item.id.bytes());
+          writer.write(item.playerId.bytes());
           writer.writeVarInt(gameModeEnum.toId(item.gameMode));
         }
         break;
@@ -2856,7 +2879,7 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
         writer.writeVarInt(2);
         writer.writeVarInt(this.update.entries.length);
         for (const item of this.update.entries) {
-          writer.write(item.id.bytes());
+          writer.write(item.playerId.bytes());
           writer.writeVarInt(item.latency);
         }
         break;
@@ -2865,16 +2888,16 @@ export class ClientboundPlayerInfoPacket implements Packet<ClientGameHandler> {
         writer.writeVarInt(3);
         writer.writeVarInt(this.update.entries.length);
         for (const item of this.update.entries) {
-          writer.write(item.id.bytes());
+          writer.write(item.playerId.bytes());
           writer.writeBoolean(item.displayName != null);
           if (item.displayName != null) writer.writeJson(item.displayName.serialize());
         }
         break;
       }
-      case "remove_player": {
+      case "remove": {
         writer.writeVarInt(4);
-        writer.writeVarInt(this.update.entries.length);
-        for (const item of this.update.entries) writer.write(item.id.bytes());
+        writer.writeVarInt(this.update.playerIds.length);
+        for (const item of this.update.playerIds) writer.write(item.bytes());
         break;
       }
       default:
@@ -2892,31 +2915,31 @@ const entityAnchorEnum = createEnumMapper<EntityAnchor>({ "feet": 0, "eyes": 1 }
 
 export class ClientboundPlayerLookAtPacket implements Packet<ClientGameHandler> {
   constructor(
-    public fromAnchor: EntityAnchor,
+    public from: EntityAnchor,
     public x: number,
     public y: number,
     public z: number,
-    public atEntity: { entity: number; toAnchor: EntityAnchor } | null,
+    public atEntity: { id: number; to: EntityAnchor } | null,
   ) {}
   static read(reader: Reader) {
-    const fromAnchor = entityAnchorEnum.fromId(reader.readVarInt());
+    const from = entityAnchorEnum.fromId(reader.readVarInt());
     const x = reader.readDouble();
     const y = reader.readDouble();
     const z = reader.readDouble();
     const atEntity = reader.readBoolean()
-      ? { entity: reader.readVarInt(), toAnchor: entityAnchorEnum.fromId(reader.readVarInt()) }
+      ? { id: reader.readVarInt(), to: entityAnchorEnum.fromId(reader.readVarInt()) }
       : null;
-    return new this(fromAnchor, x, y, z, atEntity);
+    return new this(from, x, y, z, atEntity);
   }
   write(writer: Writer) {
-    writer.writeVarInt(entityAnchorEnum.toId(this.fromAnchor));
+    writer.writeVarInt(entityAnchorEnum.toId(this.from));
     writer.writeDouble(this.x);
     writer.writeDouble(this.y);
     writer.writeDouble(this.z);
     writer.writeBoolean(this.atEntity != null);
     if (this.atEntity != null) {
-      writer.writeVarInt(this.atEntity.entity);
-      writer.writeVarInt(entityAnchorEnum.toId(this.atEntity.toAnchor));
+      writer.writeVarInt(this.atEntity.id);
+      writer.writeVarInt(entityAnchorEnum.toId(this.atEntity.to));
     }
   }
   async handle(handler: ClientGameHandler) {
@@ -2929,41 +2952,41 @@ export class ClientboundPlayerPositionPacket implements Packet<ClientGameHandler
     public x: number,
     public y: number,
     public z: number,
-    public yRot: number,
-    public xRot: number,
-    public relativeArguments: { x: boolean; y: boolean; z: boolean; yRot: boolean; xRot: boolean },
-    public id: number,
+    public yaw: number,
+    public pitch: number,
+    public relative: { x: boolean; y: boolean; z: boolean; yaw: boolean; pitch: boolean },
+    public teleportId: number,
     public dismountVehicle: boolean,
   ) {}
   static read(reader: Reader) {
     const x = reader.readDouble();
     const y = reader.readDouble();
     const z = reader.readDouble();
-    const yRot = reader.readFloat();
-    const xRot = reader.readFloat();
+    const yaw = reader.readFloat();
+    const pitch = reader.readFloat();
     const flags = reader.readByte();
-    const relativeArguments = {
+    const relative = {
       x: (flags & 0x1) > 0,
       y: (flags & 0x2) > 0,
       z: (flags & 0x4) > 0,
-      yRot: (flags & 0x8) > 0,
-      xRot: (flags & 0x10) > 0,
+      yaw: (flags & 0x8) > 0,
+      pitch: (flags & 0x10) > 0,
     };
-    const id = reader.readVarInt();
+    const teleportId = reader.readVarInt();
     const dismountVehicle = reader.readBoolean();
-    return new this(x, y, z, yRot, xRot, relativeArguments, id, dismountVehicle);
+    return new this(x, y, z, yaw, pitch, relative, teleportId, dismountVehicle);
   }
   write(writer: Writer) {
     writer.writeDouble(this.x);
     writer.writeDouble(this.y);
     writer.writeDouble(this.z);
-    writer.writeFloat(this.yRot);
-    writer.writeFloat(this.xRot);
+    writer.writeFloat(this.yaw);
+    writer.writeFloat(this.pitch);
     writer.writeByte(
-      (-this.relativeArguments.x & 0x1) | (-this.relativeArguments.y & 0x2) | (-this.relativeArguments.z & 0x4) |
-        (-this.relativeArguments.yRot & 0x8) | (-this.relativeArguments.xRot & 0x10),
+      (-this.relative.x & 0x1) | (-this.relative.y & 0x2) | (-this.relative.z & 0x4) | (-this.relative.yaw & 0x8) |
+        (-this.relative.pitch & 0x10),
     );
-    writer.writeVarInt(this.id);
+    writer.writeVarInt(this.teleportId);
     writer.writeBoolean(this.dismountVehicle);
   }
   async handle(handler: ClientGameHandler) {
@@ -2997,14 +3020,14 @@ export class ClientboundRecipePacket implements Packet<ClientGameHandler> {
     }
     const bookSettings = map;
     const list: ResourceLocation[] = [];
-    for (let i1 = reader.readVarInt(); i1--;) list.push(readResourceLocation(reader));
+    for (let i1 = reader.readVarInt(); i1--;) list.push(ResourceLocation.from(reader.readString(32767)));
     const recipes = list;
     let result: RecipeAction;
     switch (action) {
       case 0: {
         const type = "init";
         const list1: ResourceLocation[] = [];
-        for (let i2 = reader.readVarInt(); i2--;) list1.push(readResourceLocation(reader));
+        for (let i2 = reader.readVarInt(); i2--;) list1.push(ResourceLocation.from(reader.readString(32767)));
         result = { type, toHighlight: list1 };
         break;
       }
@@ -3028,11 +3051,11 @@ export class ClientboundRecipePacket implements Packet<ClientGameHandler> {
       writer.writeBoolean(settings?.filtering ?? false);
     }
     writer.writeVarInt(this.recipes.length);
-    for (const item of this.recipes) writeResourceLocation(writer, item);
+    for (const item of this.recipes) writer.writeString(item.toString());
     switch (this.action.type) {
       case "init": {
         writer.writeVarInt(this.action.toHighlight.length);
-        for (const item1 of this.action.toHighlight) writeResourceLocation(writer, item1);
+        for (const item1 of this.action.toHighlight) writer.writeString(item1.toString());
         break;
       }
       case "add": {
@@ -3119,27 +3142,27 @@ export class ClientboundRespawnPacket implements Packet<ClientGameHandler> {
     public dimensionType: DimensionType,
     public dimension: Dimension,
     public seed: bigint,
-    public playerGameType: GameType,
-    public previousPlayerGameType: NullableGameType,
+    public playerGameMode: GameMode,
+    public previousPlayerGameMode: NullableGameMode,
     public isDebug: boolean,
     public isFlat: boolean,
     public keepAllPlayerData: boolean,
     public lastDeathLocation: GlobalPos | null,
   ) {}
   static read(reader: Reader) {
-    const dimensionType = readResourceLocation(reader);
-    const dimension = readResourceLocation(reader);
+    const dimensionType = ResourceLocation.from(reader.readString(32767));
+    const dimension = ResourceLocation.from(reader.readString(32767));
     const seed = reader.readLong();
-    const playerGameType = gameTypeEnum.fromId(reader.readByte());
-    let gameType: GameType | null = null;
+    const playerGameMode = gameModeEnum.fromId(reader.readByte());
+    let gameMode: GameMode | null = null;
     const bytes = reader.read(reader.unreadBytes);
     reader = new Reader(bytes);
     if (new Reader(bytes).readByte() != -1) {
-      gameType = gameTypeEnum.fromId(reader.readByte());
+      gameMode = gameModeEnum1.fromId(reader.readByte());
     } else {
       reader.readByte();
     }
-    const previousPlayerGameType = gameType;
+    const previousPlayerGameMode = gameMode;
     const isDebug = reader.readBoolean();
     const isFlat = reader.readBoolean();
     const keepAllPlayerData = reader.readBoolean();
@@ -3148,8 +3171,8 @@ export class ClientboundRespawnPacket implements Packet<ClientGameHandler> {
       dimensionType,
       dimension,
       seed,
-      playerGameType,
-      previousPlayerGameType,
+      playerGameMode,
+      previousPlayerGameMode,
       isDebug,
       isFlat,
       keepAllPlayerData,
@@ -3157,12 +3180,12 @@ export class ClientboundRespawnPacket implements Packet<ClientGameHandler> {
     );
   }
   write(writer: Writer) {
-    writeResourceLocation(writer, this.dimensionType);
-    writeResourceLocation(writer, this.dimension);
+    writer.writeString(this.dimensionType.toString());
+    writer.writeString(this.dimension.toString());
     writer.writeLong(this.seed);
-    writer.writeByte(gameTypeEnum.toId(this.playerGameType));
-    if (this.previousPlayerGameType != null) {
-      writer.writeByte(gameTypeEnum.toId(this.previousPlayerGameType));
+    writer.writeByte(gameModeEnum.toId(this.playerGameMode));
+    if (this.previousPlayerGameMode != null) {
+      writer.writeByte(gameModeEnum1.toId(this.previousPlayerGameMode));
     } else {
       writer.writeByte(-1);
     }
@@ -3180,16 +3203,16 @@ export class ClientboundRespawnPacket implements Packet<ClientGameHandler> {
 export class ClientboundRotateHeadPacket implements Packet<ClientGameHandler> {
   constructor(
     public entityId: number,
-    public yHeadRot: number,
+    public headYaw: number,
   ) {}
   static read(reader: Reader) {
     const entityId = reader.readVarInt();
-    const yHeadRot = reader.readByte();
-    return new this(entityId, yHeadRot);
+    const headYaw = reader.readByte();
+    return new this(entityId, headYaw);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.entityId);
-    writer.writeByte(this.yHeadRot);
+    writer.writeByte(this.headYaw);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleRotateHead?.(this);
@@ -3249,12 +3272,12 @@ export class ClientboundSelectAdvancementsTabPacket implements Packet<ClientGame
     public tab: ResourceLocation | null,
   ) {}
   static read(reader: Reader) {
-    const tab = reader.readBoolean() ? readResourceLocation(reader) : null;
+    const tab = reader.readBoolean() ? ResourceLocation.from(reader.readString(32767)) : null;
     return new this(tab);
   }
   write(writer: Writer) {
     writer.writeBoolean(this.tab != null);
-    if (this.tab != null) writeResourceLocation(writer, this.tab);
+    if (this.tab != null) writer.writeString(this.tab.toString());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSelectAdvancementsTab?.(this);
@@ -3264,22 +3287,23 @@ export class ClientboundSelectAdvancementsTabPacket implements Packet<ClientGame
 export class ClientboundServerDataPacket implements Packet<ClientGameHandler> {
   constructor(
     public motd: Component | null,
-    public iconBase64: string | null,
+    /** Icon encoded as base64 */
+    public icon: string | null,
     public previewsChat: boolean,
     public enforcesSecureChat: boolean,
   ) {}
   static read(reader: Reader) {
     const motd = reader.readBoolean() ? Component.deserialize(reader.readJson()) : null;
-    const iconBase64 = reader.readBoolean() ? reader.readString() : null;
+    const icon = reader.readBoolean() ? reader.readString() : null;
     const previewsChat = reader.readBoolean();
     const enforcesSecureChat = reader.readBoolean();
-    return new this(motd, iconBase64, previewsChat, enforcesSecureChat);
+    return new this(motd, icon, previewsChat, enforcesSecureChat);
   }
   write(writer: Writer) {
     writer.writeBoolean(this.motd != null);
     if (this.motd != null) writer.writeJson(this.motd.serialize());
-    writer.writeBoolean(this.iconBase64 != null);
-    if (this.iconBase64 != null) writer.writeString(this.iconBase64);
+    writer.writeBoolean(this.icon != null);
+    if (this.icon != null) writer.writeString(this.icon);
     writer.writeBoolean(this.previewsChat);
     writer.writeBoolean(this.enforcesSecureChat);
   }
@@ -3306,17 +3330,17 @@ export class ClientboundSetActionBarTextPacket implements Packet<ClientGameHandl
 
 export class ClientboundSetBorderCenterPacket implements Packet<ClientGameHandler> {
   constructor(
-    public newCenterX: number,
-    public newCenterZ: number,
+    public centerX: number,
+    public centerZ: number,
   ) {}
   static read(reader: Reader) {
-    const newCenterX = reader.readDouble();
-    const newCenterZ = reader.readDouble();
-    return new this(newCenterX, newCenterZ);
+    const centerX = reader.readDouble();
+    const centerZ = reader.readDouble();
+    return new this(centerX, centerZ);
   }
   write(writer: Writer) {
-    writer.writeDouble(this.newCenterX);
-    writer.writeDouble(this.newCenterZ);
+    writer.writeDouble(this.centerX);
+    writer.writeDouble(this.centerZ);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetBorderCenter?.(this);
@@ -3395,14 +3419,14 @@ export class ClientboundSetBorderWarningDistancePacket implements Packet<ClientG
 
 export class ClientboundSetCameraPacket implements Packet<ClientGameHandler> {
   constructor(
-    public cameraId: number,
+    public entityId: number,
   ) {}
   static read(reader: Reader) {
-    const cameraId = reader.readVarInt();
-    return new this(cameraId);
+    const entityId = reader.readVarInt();
+    return new this(entityId);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.cameraId);
+    writer.writeVarInt(this.entityId);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetCamera?.(this);
@@ -3446,14 +3470,14 @@ export class ClientboundSetChunkCacheCenterPacket implements Packet<ClientGameHa
 
 export class ClientboundSetChunkCacheRadiusPacket implements Packet<ClientGameHandler> {
   constructor(
-    public radius: number,
+    public chunkRadius: number,
   ) {}
   static read(reader: Reader) {
-    const radius = reader.readVarInt();
-    return new this(radius);
+    const chunkRadius = reader.readVarInt();
+    return new this(chunkRadius);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.radius);
+    writer.writeVarInt(this.chunkRadius);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetChunkCacheRadius?.(this);
@@ -3481,14 +3505,14 @@ export class ClientboundSetDefaultSpawnPositionPacket implements Packet<ClientGa
 
 export class ClientboundSetDisplayChatPreviewPacket implements Packet<ClientGameHandler> {
   constructor(
-    public enabled: boolean,
+    public previewEnabled: boolean,
   ) {}
   static read(reader: Reader) {
-    const enabled = reader.readBoolean();
-    return new this(enabled);
+    const previewEnabled = reader.readBoolean();
+    return new this(previewEnabled);
   }
   write(writer: Writer) {
-    writer.writeBoolean(this.enabled);
+    writer.writeBoolean(this.previewEnabled);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetDisplayChatPreview?.(this);
@@ -3646,10 +3670,10 @@ export class ClientboundSetEntityDataPacket implements Packet<ClientGameHandler>
               result1 = { type: "minecraft:angry_villager" };
               break;
             case "minecraft:block":
-              result1 = { type: "minecraft:block", state: readBlockState(reader) };
+              result1 = { type: "minecraft:block", blockState: readBlockState(reader) };
               break;
             case "minecraft:block_marker":
-              result1 = { type: "minecraft:block_marker", state: readBlockState(reader) };
+              result1 = { type: "minecraft:block_marker", blockState: readBlockState(reader) };
               break;
             case "minecraft:bubble":
               result1 = { type: "minecraft:bubble" };
@@ -3724,7 +3748,7 @@ export class ClientboundSetEntityDataPacket implements Packet<ClientGameHandler>
               result1 = { type: "minecraft:sonic_boom" };
               break;
             case "minecraft:falling_dust":
-              result1 = { type: "minecraft:falling_dust", state: readBlockState(reader) };
+              result1 = { type: "minecraft:falling_dust", blockState: readBlockState(reader) };
               break;
             case "minecraft:firework":
               result1 = { type: "minecraft:firework" };
@@ -4072,12 +4096,12 @@ export class ClientboundSetEntityDataPacket implements Packet<ClientGameHandler>
             }
             case "minecraft:block": {
               writer.writeVarInt(particleTypeEnum.toId("minecraft:block"));
-              writeBlockState(writer, data.particle.state);
+              writeBlockState(writer, data.particle.blockState);
               break;
             }
             case "minecraft:block_marker": {
               writer.writeVarInt(particleTypeEnum.toId("minecraft:block_marker"));
-              writeBlockState(writer, data.particle.state);
+              writeBlockState(writer, data.particle.blockState);
               break;
             }
             case "minecraft:bubble": {
@@ -4177,7 +4201,7 @@ export class ClientboundSetEntityDataPacket implements Packet<ClientGameHandler>
             }
             case "minecraft:falling_dust": {
               writer.writeVarInt(particleTypeEnum.toId("minecraft:falling_dust"));
-              writeBlockState(writer, data.particle.state);
+              writeBlockState(writer, data.particle.blockState);
               break;
             }
             case "minecraft:firework": {
@@ -4529,22 +4553,25 @@ export class ClientboundSetEntityLinkPacket implements Packet<ClientGameHandler>
 export class ClientboundSetEntityMotionPacket implements Packet<ClientGameHandler> {
   constructor(
     public id: number,
-    public xa: number,
-    public ya: number,
-    public za: number,
+    /** Velocity on the X axis. */
+    public vx: number,
+    /** Velocity on the X axis. */
+    public vy: number,
+    /** Velocity on the X axis. */
+    public vz: number,
   ) {}
   static read(reader: Reader) {
     const id = reader.readVarInt();
-    const xa = reader.readShort();
-    const ya = reader.readShort();
-    const za = reader.readShort();
-    return new this(id, xa, ya, za);
+    const vx = reader.readShort();
+    const vy = reader.readShort();
+    const vz = reader.readShort();
+    return new this(id, vx, vy, vz);
   }
   write(writer: Writer) {
     writer.writeVarInt(this.id);
-    writer.writeShort(this.xa);
-    writer.writeShort(this.ya);
-    writer.writeShort(this.za);
+    writer.writeShort(this.vx);
+    writer.writeShort(this.vy);
+    writer.writeShort(this.vz);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetEntityMotion?.(this);
@@ -4553,26 +4580,26 @@ export class ClientboundSetEntityMotionPacket implements Packet<ClientGameHandle
 
 export class ClientboundSetEquipmentPacket implements Packet<ClientGameHandler> {
   constructor(
-    public entity: number,
-    public slots: Map<EquipmentSlot, ItemStack>,
+    public entityId: number,
+    public equipmentSlots: Map<EquipmentSlot, ItemStack>,
   ) {}
   static read(reader: Reader) {
-    const entity = reader.readVarInt();
-    let slots: Map<EquipmentSlot, ItemStack> = new Map();
+    const entityId = reader.readVarInt();
+    let equipmentSlots: Map<EquipmentSlot, ItemStack> = new Map();
     let i: number;
     do {
       i = reader.readByte();
       const slot = equipmentSlotEnum.fromId(i & 127);
-      slots.set(slot, readItemStack(reader));
+      equipmentSlots.set(slot, readItemStack(reader));
     } while ((i & -128) != 0);
-    return new this(entity, slots);
+    return new this(entityId, equipmentSlots);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.entity);
-    const slots = [...this.slots.keys()];
-    for (let i = 0; i < slots.length; i++) {
-      writer.writeByte(equipmentSlotEnum.toId(slots[i]!) | (i != slots.length - 1 ? -128 : 0));
-      writeItemStack(writer, this.slots.get(slots[i]!)!);
+    writer.writeVarInt(this.entityId);
+    const equipmentSlots = [...this.equipmentSlots.keys()];
+    for (let i = 0; i < equipmentSlots.length; i++) {
+      writer.writeByte(equipmentSlotEnum.toId(equipmentSlots[i]!) | (i != equipmentSlots.length - 1 ? -128 : 0));
+      writeItemStack(writer, this.equipmentSlots.get(equipmentSlots[i]!)!);
     }
   }
   async handle(handler: ClientGameHandler) {
@@ -4695,20 +4722,20 @@ export class ClientboundSetObjectivePacket implements Packet<ClientGameHandler> 
 
 export class ClientboundSetPassengersPacket implements Packet<ClientGameHandler> {
   constructor(
-    public vehicle: number,
-    public passengers: number[],
+    public vehicleEntityId: number,
+    public passengerEntityIds: number[],
   ) {}
   static read(reader: Reader) {
-    const vehicle = reader.readVarInt();
+    const vehicleEntityId = reader.readVarInt();
     const list: number[] = [];
     for (let i = reader.readVarInt(); i--;) list.push(reader.readVarInt());
-    const passengers = list;
-    return new this(vehicle, passengers);
+    const passengerEntityIds = list;
+    return new this(vehicleEntityId, passengerEntityIds);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.vehicle);
-    writer.writeVarInt(this.passengers.length);
-    for (const item of this.passengers) writer.writeVarInt(item);
+    writer.writeVarInt(this.vehicleEntityId);
+    writer.writeVarInt(this.passengerEntityIds.length);
+    for (const item of this.passengerEntityIds) writer.writeVarInt(item);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetPassengers?.(this);
@@ -4717,102 +4744,105 @@ export class ClientboundSetPassengersPacket implements Packet<ClientGameHandler>
 
 export class ClientboundSetPlayerTeamPacket implements Packet<ClientGameHandler> {
   constructor(
-    public name: string,
+    public teamName: string,
     public action:
       | {
         type: "add_team";
-        parameters: {
-          displayName: Component;
-          options: number;
-          nametagVisibility: string;
-          collisionRule: string;
-          color: ChatFormatting;
-          playerPrefix: Component;
-          playerSuffix: Component;
-        };
+        displayName: Component;
+        flags: { allowFriendlyFire: boolean; seeFriendlyInvisibles: boolean };
+        nametagVisibility: string;
+        collisionRule: string;
+        color: ChatFormatting;
+        playerPrefix: Component;
+        playerSuffix: Component;
         players: string[];
       }
       | { type: "remove_team" }
       | {
         type: "modify_team";
-        parameters: {
-          displayName: Component;
-          options: number;
-          nametagVisibility: string;
-          collisionRule: string;
-          color: ChatFormatting;
-          playerPrefix: Component;
-          playerSuffix: Component;
-        };
+        displayName: Component;
+        flags: { allowFriendlyFire: boolean; seeFriendlyInvisibles: boolean };
+        nametagVisibility: string;
+        collisionRule: string;
+        color: ChatFormatting;
+        playerPrefix: Component;
+        playerSuffix: Component;
       }
       | { type: "add_players"; players: string[] }
       | { type: "remove_players"; players: string[] },
   ) {}
   static read(reader: Reader) {
-    const name = reader.readString();
+    const teamName = reader.readString();
     let result:
       | {
         type: "add_team";
-        parameters: {
-          displayName: Component;
-          options: number;
-          nametagVisibility: string;
-          collisionRule: string;
-          color: ChatFormatting;
-          playerPrefix: Component;
-          playerSuffix: Component;
-        };
+        displayName: Component;
+        flags: { allowFriendlyFire: boolean; seeFriendlyInvisibles: boolean };
+        nametagVisibility: string;
+        collisionRule: string;
+        color: ChatFormatting;
+        playerPrefix: Component;
+        playerSuffix: Component;
         players: string[];
       }
       | { type: "remove_team" }
       | {
         type: "modify_team";
-        parameters: {
-          displayName: Component;
-          options: number;
-          nametagVisibility: string;
-          collisionRule: string;
-          color: ChatFormatting;
-          playerPrefix: Component;
-          playerSuffix: Component;
-        };
+        displayName: Component;
+        flags: { allowFriendlyFire: boolean; seeFriendlyInvisibles: boolean };
+        nametagVisibility: string;
+        collisionRule: string;
+        color: ChatFormatting;
+        playerPrefix: Component;
+        playerSuffix: Component;
       }
       | { type: "add_players"; players: string[] }
       | { type: "remove_players"; players: string[] };
     switch (reader.readByte()) {
       case 0: {
         const type = "add_team";
-        const parameters = {
-          displayName: Component.deserialize(reader.readJson()),
-          options: reader.readByte(),
+        const displayName = Component.deserialize(reader.readJson());
+        const flags1 = reader.readByte();
+        const flags = { allowFriendlyFire: (flags1 & 0x1) > 0, seeFriendlyInvisibles: (flags1 & 0x2) > 0 };
+        const nametagVisibility = reader.readString();
+        const collisionRule = reader.readString();
+        const color = chatFormattingEnum.fromId(reader.readVarInt());
+        const playerPrefix = Component.deserialize(reader.readJson());
+        const playerSuffix = Component.deserialize(reader.readJson());
+        const list: string[] = [];
+        for (let i = reader.readVarInt(); i--;) list.push(reader.readString());
+        result = {
+          type,
+          displayName,
+          flags,
+          nametagVisibility,
+          collisionRule,
+          color,
+          playerPrefix,
+          playerSuffix,
+          players: list,
+        };
+        break;
+      }
+      case 1:
+        result = { type: "remove_team" };
+        break;
+      case 2: {
+        const type = "modify_team";
+        const displayName = Component.deserialize(reader.readJson());
+        const flags1 = reader.readByte();
+        result = {
+          type,
+          displayName,
+          flags: { allowFriendlyFire: (flags1 & 0x1) > 0, seeFriendlyInvisibles: (flags1 & 0x2) > 0 },
           nametagVisibility: reader.readString(),
           collisionRule: reader.readString(),
           color: chatFormattingEnum.fromId(reader.readVarInt()),
           playerPrefix: Component.deserialize(reader.readJson()),
           playerSuffix: Component.deserialize(reader.readJson()),
         };
-        const list: string[] = [];
-        for (let i = reader.readVarInt(); i--;) list.push(reader.readString());
-        result = { type, parameters, players: list };
         break;
       }
-      case 1:
-        result = { type: "remove_team" };
-        break;
-      case 2:
-        result = {
-          type: "modify_team",
-          parameters: {
-            displayName: Component.deserialize(reader.readJson()),
-            options: reader.readByte(),
-            nametagVisibility: reader.readString(),
-            collisionRule: reader.readString(),
-            color: chatFormattingEnum.fromId(reader.readVarInt()),
-            playerPrefix: Component.deserialize(reader.readJson()),
-            playerSuffix: Component.deserialize(reader.readJson()),
-          },
-        };
-        break;
       case 3: {
         const type = "add_players";
         const list: string[] = [];
@@ -4831,20 +4861,22 @@ export class ClientboundSetPlayerTeamPacket implements Packet<ClientGameHandler>
         throw new Error("Invalid tag id");
     }
     const action = result;
-    return new this(name, action);
+    return new this(teamName, action);
   }
   write(writer: Writer) {
-    writer.writeString(this.name);
+    writer.writeString(this.teamName);
     switch (this.action.type) {
       case "add_team": {
         writer.writeByte(0);
-        writer.writeJson(this.action.parameters.displayName.serialize());
-        writer.writeByte(this.action.parameters.options);
-        writer.writeString(this.action.parameters.nametagVisibility);
-        writer.writeString(this.action.parameters.collisionRule);
-        writer.writeVarInt(chatFormattingEnum.toId(this.action.parameters.color));
-        writer.writeJson(this.action.parameters.playerPrefix.serialize());
-        writer.writeJson(this.action.parameters.playerSuffix.serialize());
+        writer.writeJson(this.action.displayName.serialize());
+        writer.writeByte(
+          (-this.action.flags.allowFriendlyFire & 0x1) | (-this.action.flags.seeFriendlyInvisibles & 0x2),
+        );
+        writer.writeString(this.action.nametagVisibility);
+        writer.writeString(this.action.collisionRule);
+        writer.writeVarInt(chatFormattingEnum.toId(this.action.color));
+        writer.writeJson(this.action.playerPrefix.serialize());
+        writer.writeJson(this.action.playerSuffix.serialize());
         writer.writeVarInt(this.action.players.length);
         for (const item of this.action.players) writer.writeString(item);
         break;
@@ -4855,13 +4887,15 @@ export class ClientboundSetPlayerTeamPacket implements Packet<ClientGameHandler>
       }
       case "modify_team": {
         writer.writeByte(2);
-        writer.writeJson(this.action.parameters.displayName.serialize());
-        writer.writeByte(this.action.parameters.options);
-        writer.writeString(this.action.parameters.nametagVisibility);
-        writer.writeString(this.action.parameters.collisionRule);
-        writer.writeVarInt(chatFormattingEnum.toId(this.action.parameters.color));
-        writer.writeJson(this.action.parameters.playerPrefix.serialize());
-        writer.writeJson(this.action.parameters.playerSuffix.serialize());
+        writer.writeJson(this.action.displayName.serialize());
+        writer.writeByte(
+          (-this.action.flags.allowFriendlyFire & 0x1) | (-this.action.flags.seeFriendlyInvisibles & 0x2),
+        );
+        writer.writeString(this.action.nametagVisibility);
+        writer.writeString(this.action.collisionRule);
+        writer.writeVarInt(chatFormattingEnum.toId(this.action.color));
+        writer.writeJson(this.action.playerPrefix.serialize());
+        writer.writeJson(this.action.playerSuffix.serialize());
         break;
       }
       case "add_players": {
@@ -4951,14 +4985,14 @@ export class ClientboundSetSimulationDistancePacket implements Packet<ClientGame
 
 export class ClientboundSetSubtitleTextPacket implements Packet<ClientGameHandler> {
   constructor(
-    public text: Component,
+    public subtitle: Component,
   ) {}
   static read(reader: Reader) {
-    const text = Component.deserialize(reader.readJson());
-    return new this(text);
+    const subtitle = Component.deserialize(reader.readJson());
+    return new this(subtitle);
   }
   write(writer: Writer) {
-    writer.writeJson(this.text.serialize());
+    writer.writeJson(this.subtitle.serialize());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetSubtitleText?.(this);
@@ -4986,14 +5020,14 @@ export class ClientboundSetTimePacket implements Packet<ClientGameHandler> {
 
 export class ClientboundSetTitleTextPacket implements Packet<ClientGameHandler> {
   constructor(
-    public text: Component,
+    public title: Component,
   ) {}
   static read(reader: Reader) {
-    const text = Component.deserialize(reader.readJson());
-    return new this(text);
+    const title = Component.deserialize(reader.readJson());
+    return new this(title);
   }
   write(writer: Writer) {
-    writer.writeJson(this.text.serialize());
+    writer.writeJson(this.title.serialize());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSetTitleText?.(this);
@@ -5003,18 +5037,18 @@ export class ClientboundSetTitleTextPacket implements Packet<ClientGameHandler> 
 export class ClientboundSetTitlesAnimationPacket implements Packet<ClientGameHandler> {
   constructor(
     public fadeIn: number,
-    public say: number,
+    public stay: number,
     public fadeOut: number,
   ) {}
   static read(reader: Reader) {
     const fadeIn = reader.readInt();
-    const say = reader.readInt();
+    const stay = reader.readInt();
     const fadeOut = reader.readInt();
-    return new this(fadeIn, say, fadeOut);
+    return new this(fadeIn, stay, fadeOut);
   }
   write(writer: Writer) {
     writer.writeInt(this.fadeIn);
-    writer.writeInt(this.say);
+    writer.writeInt(this.stay);
     writer.writeInt(this.fadeOut);
   }
   async handle(handler: ClientGameHandler) {
@@ -5062,7 +5096,7 @@ export class ClientboundSoundPacket implements Packet<ClientGameHandler> {
     public z: number,
     public volume: number,
     public pitch: number,
-    public seen: bigint,
+    public seed: bigint,
   ) {}
   static read(reader: Reader) {
     const sound = soundEventEnum.fromId(reader.readVarInt());
@@ -5072,8 +5106,8 @@ export class ClientboundSoundPacket implements Packet<ClientGameHandler> {
     const z = reader.readInt();
     const volume = reader.readFloat();
     const pitch = reader.readFloat();
-    const seen = reader.readLong();
-    return new this(sound, source, x, y, z, volume, pitch, seen);
+    const seed = reader.readLong();
+    return new this(sound, source, x, y, z, volume, pitch, seed);
   }
   write(writer: Writer) {
     writer.writeVarInt(soundEventEnum.toId(this.sound));
@@ -5083,7 +5117,7 @@ export class ClientboundSoundPacket implements Packet<ClientGameHandler> {
     writer.writeInt(this.z);
     writer.writeFloat(this.volume);
     writer.writeFloat(this.pitch);
-    writer.writeLong(this.seen);
+    writer.writeLong(this.seed);
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleSound?.(this);
@@ -5093,18 +5127,18 @@ export class ClientboundSoundPacket implements Packet<ClientGameHandler> {
 export class ClientboundStopSoundPacket implements Packet<ClientGameHandler> {
   constructor(
     public source: SoundSource | null,
-    public name: ResourceLocation | null,
+    public sound: ResourceLocation | null,
   ) {}
   static read(reader: Reader) {
     const flags = reader.readByte();
     const source = (flags & 0x1) != 0 ? soundSourceEnum.fromId(reader.readVarInt()) : null;
-    const name = (flags & 0x1) != 0 ? readResourceLocation(reader) : null;
-    return new this(source, name);
+    const sound = (flags & 0x1) != 0 ? ResourceLocation.from(reader.readString(32767)) : null;
+    return new this(source, sound);
   }
   write(writer: Writer) {
-    writer.writeByte(-(this.source != null) & 0x1 | -(this.name != null) & 0x2);
+    writer.writeByte(-(this.source != null) & 0x1 | -(this.sound != null) & 0x2);
     if (this.source != null) writer.writeVarInt(soundSourceEnum.toId(this.source));
-    if (this.name != null) writeResourceLocation(writer, this.name);
+    if (this.sound != null) writer.writeString(this.sound.toString());
   }
   async handle(handler: ClientGameHandler) {
     await handler.handleStopSound?.(this);
@@ -5170,18 +5204,18 @@ export class ClientboundTagQueryPacket implements Packet<ClientGameHandler> {
 
 export class ClientboundTakeItemEntityPacket implements Packet<ClientGameHandler> {
   constructor(
-    public itemId: number,
+    public entityId: number,
     public playerId: number,
     public amount: number,
   ) {}
   static read(reader: Reader) {
-    const itemId = reader.readVarInt();
+    const entityId = reader.readVarInt();
     const playerId = reader.readVarInt();
     const amount = reader.readVarInt();
-    return new this(itemId, playerId, amount);
+    return new this(entityId, playerId, amount);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.itemId);
+    writer.writeVarInt(this.entityId);
     writer.writeVarInt(this.playerId);
     writer.writeVarInt(this.amount);
   }
@@ -5192,31 +5226,31 @@ export class ClientboundTakeItemEntityPacket implements Packet<ClientGameHandler
 
 export class ClientboundTeleportEntityPacket implements Packet<ClientGameHandler> {
   constructor(
-    public id: number,
+    public entityId: number,
     public x: number,
     public y: number,
     public z: number,
-    public yRot: number,
-    public xRot: number,
+    public yaw: number,
+    public pitch: number,
     public onGround: boolean,
   ) {}
   static read(reader: Reader) {
-    const id = reader.readVarInt();
+    const entityId = reader.readVarInt();
     const x = reader.readDouble();
     const y = reader.readDouble();
     const z = reader.readDouble();
-    const yRot = reader.readByte();
-    const xRot = reader.readByte();
+    const yaw = reader.readByte();
+    const pitch = reader.readByte();
     const onGround = reader.readBoolean();
-    return new this(id, x, y, z, yRot, xRot, onGround);
+    return new this(entityId, x, y, z, yaw, pitch, onGround);
   }
   write(writer: Writer) {
-    writer.writeVarInt(this.id);
+    writer.writeVarInt(this.entityId);
     writer.writeDouble(this.x);
     writer.writeDouble(this.y);
     writer.writeDouble(this.z);
-    writer.writeByte(this.yRot);
-    writer.writeByte(this.xRot);
+    writer.writeByte(this.yaw);
+    writer.writeByte(this.pitch);
     writer.writeBoolean(this.onGround);
   }
   async handle(handler: ClientGameHandler) {
@@ -5262,8 +5296,8 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
     const reset = reader.readBoolean();
     const map: Map<ResourceLocation, Advancement> = new Map();
     for (let i = reader.readVarInt(); i--;) {
-      const key = readResourceLocation(reader);
-      const parentId = reader.readBoolean() ? readResourceLocation(reader) : null;
+      const key = ResourceLocation.from(reader.readString(32767));
+      const parentId = reader.readBoolean() ? ResourceLocation.from(reader.readString(32767)) : null;
       let value1: DisplayInfo | null = null;
       if (reader.readBoolean()) {
         const title = Component.deserialize(reader.readJson());
@@ -5272,7 +5306,7 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
         const frame = frameTypeEnum.fromId(reader.readVarInt());
         const flags = reader.readInt();
         let background: ResourceLocation | null = null;
-        if ((flags & 0x1) != 0) background = readResourceLocation(reader);
+        if ((flags & 0x1) != 0) background = ResourceLocation.from(reader.readString(32767));
         value1 = {
           title,
           description,
@@ -5298,14 +5332,14 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
     }
     const added = map;
     const list: ResourceLocation[] = [];
-    for (let i1 = reader.readVarInt(); i1--;) list.push(readResourceLocation(reader));
+    for (let i1 = reader.readVarInt(); i1--;) list.push(ResourceLocation.from(reader.readString(32767)));
     const removed = list;
     const map1: Map<ResourceLocation, AdvancementProgress> = new Map();
     for (let i2 = reader.readVarInt(); i2--;) {
-      const key = readResourceLocation(reader);
+      const key = ResourceLocation.from(reader.readString(32767));
       const map2: AdvancementProgress = new Map();
       for (let i3 = reader.readVarInt(); i3--;) {
-        const key1 = readResourceLocation(reader);
+        const key1 = ResourceLocation.from(reader.readString(32767));
         const value1 = { obtainedAt: reader.readBoolean() ? new Date(Number(reader.readLong())) : null };
         map2.set(key1, value1);
       }
@@ -5319,9 +5353,9 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
     writer.writeBoolean(this.reset);
     writer.writeVarInt(this.added.size);
     for (const [key, value] of this.added) {
-      writeResourceLocation(writer, key);
+      writer.writeString(key.toString());
       writer.writeBoolean(value.parentId != null);
-      if (value.parentId != null) writeResourceLocation(writer, value.parentId);
+      if (value.parentId != null) writer.writeString(value.parentId.toString());
       writer.writeBoolean(value.display != null);
       if (value.display != null) {
         writer.writeJson(value.display.title.serialize());
@@ -5332,7 +5366,7 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
           -(value.display.background != null) & 0x1 | -value.display.showToast & 0x2 | -value.display.hidden & 0x4,
         );
         if (value.display.background != null) {
-          writeResourceLocation(writer, value.display.background);
+          writer.writeString(value.display.background.toString());
         }
         writer.writeFloat(value.display.x);
         writer.writeFloat(value.display.y);
@@ -5346,13 +5380,13 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
       }
     }
     writer.writeVarInt(this.removed.length);
-    for (const item of this.removed) writeResourceLocation(writer, item);
+    for (const item of this.removed) writer.writeString(item.toString());
     writer.writeVarInt(this.progress.size);
     for (const [key, value] of this.progress) {
-      writeResourceLocation(writer, key);
+      writer.writeString(key.toString());
       writer.writeVarInt(value.size);
       for (const [key1, value1] of value) {
-        writeResourceLocation(writer, key1);
+        writer.writeString(key1.toString());
         writer.writeBoolean(value1.obtainedAt != null);
         if (value1.obtainedAt != null) writer.writeLong(BigInt(value1.obtainedAt.getTime()));
       }
@@ -5363,28 +5397,28 @@ export class ClientboundUpdateAdvancementsPacket implements Packet<ClientGameHan
   }
 }
 
+export type Attribute = { id: ResourceLocation; base: number; modifiers: AttributeModifier[] };
+
+export type AttributeModifier = {
+  id: Uuid;
+  amount: number;
+  operation: "addition" | "multiply_base" | "multiply_total";
+};
+
 const mapper1 = createEnumMapper({ "addition": 0, "multiply_base": 1, "multiply_total": 2 });
 
 export class ClientboundUpdateAttributesPacket implements Packet<ClientGameHandler> {
   constructor(
     public entityId: number,
-    public attributes: {
-      attribute: ResourceLocation;
-      base: number;
-      modifiers: { id: Uuid; amount: number; operation: "addition" | "multiply_base" | "multiply_total" }[];
-    }[],
+    public attributes: Attribute[],
   ) {}
   static read(reader: Reader) {
     const entityId = reader.readVarInt();
-    const list: {
-      attribute: ResourceLocation;
-      base: number;
-      modifiers: { id: Uuid; amount: number; operation: "addition" | "multiply_base" | "multiply_total" }[];
-    }[] = [];
+    const list: Attribute[] = [];
     for (let i = reader.readVarInt(); i--;) {
-      const attribute = readResourceLocation(reader);
+      const id = ResourceLocation.from(reader.readString(32767));
       const base = reader.readDouble();
-      const list1: { id: Uuid; amount: number; operation: "addition" | "multiply_base" | "multiply_total" }[] = [];
+      const list1: AttributeModifier[] = [];
       for (let i1 = reader.readVarInt(); i1--;) {
         list1.push({
           id: Uuid.from(reader.read(16)),
@@ -5392,7 +5426,7 @@ export class ClientboundUpdateAttributesPacket implements Packet<ClientGameHandl
           operation: mapper1.fromId(reader.readVarInt()),
         });
       }
-      list.push({ attribute, base, modifiers: list1 });
+      list.push({ id, base, modifiers: list1 });
     }
     const attributes = list;
     return new this(entityId, attributes);
@@ -5401,7 +5435,7 @@ export class ClientboundUpdateAttributesPacket implements Packet<ClientGameHandl
     writer.writeVarInt(this.entityId);
     writer.writeVarInt(this.attributes.length);
     for (const item of this.attributes) {
-      writeResourceLocation(writer, item.attribute);
+      writer.writeString(item.id.toString());
       writer.writeDouble(item.base);
       writer.writeVarInt(item.modifiers.length);
       for (const item1 of item.modifiers) {
@@ -5449,33 +5483,33 @@ export class ClientboundUpdateMobEffectPacket implements Packet<ClientGameHandle
   }
 }
 
-export type Recipe = { id: ResourceLocation; serializer: RecipeSerializer };
+export type Recipe = { recipeId: ResourceLocation; serializer: RecipeSerializer };
 
 export type RecipeSerializer =
   | {
-    id: "minecraft:crafting_shaped";
+    id: "crafting_shaped";
     width: number;
     height: number;
     group: string;
     ingredients: Ingredient[];
     result: ItemStack;
   }
-  | { id: "minecraft:crafting_shapeless"; group: string; ingredients: Ingredient[]; result: ItemStack }
-  | { id: "minecraft:crafting_special_armordye" }
-  | { id: "minecraft:crafting_special_bookcloning" }
-  | { id: "minecraft:crafting_special_mapcloning" }
-  | { id: "minecraft:crafting_special_mapextending" }
-  | { id: "minecraft:crafting_special_firework_rocket" }
-  | { id: "minecraft:crafting_special_firework_star" }
-  | { id: "minecraft:crafting_special_firework_star_fade" }
-  | { id: "minecraft:crafting_special_tippedarrow" }
-  | { id: "minecraft:crafting_special_bannerduplicate" }
-  | { id: "minecraft:crafting_special_shielddecoration" }
-  | { id: "minecraft:crafting_special_shulkerboxcoloring" }
-  | { id: "minecraft:crafting_special_suspiciousstew" }
-  | { id: "minecraft:crafting_special_repairitem" }
+  | { id: "crafting_shapeless"; group: string; ingredients: Ingredient[]; result: ItemStack }
+  | { id: "crafting_special_armordye" }
+  | { id: "crafting_special_bookcloning" }
+  | { id: "crafting_special_mapcloning" }
+  | { id: "crafting_special_mapextending" }
+  | { id: "crafting_special_firework_rocket" }
+  | { id: "crafting_special_firework_star" }
+  | { id: "crafting_special_firework_star_fade" }
+  | { id: "crafting_special_tippedarrow" }
+  | { id: "crafting_special_bannerduplicate" }
+  | { id: "crafting_special_shielddecoration" }
+  | { id: "crafting_special_shulkerboxcoloring" }
+  | { id: "crafting_special_suspiciousstew" }
+  | { id: "crafting_special_repairitem" }
   | {
-    id: "minecraft:smelting";
+    id: "smelting";
     group: string;
     ingredient: Ingredient;
     result: ItemStack;
@@ -5483,31 +5517,24 @@ export type RecipeSerializer =
     cookingTime: number;
   }
   | {
-    id: "minecraft:blasting";
+    id: "blasting";
     group: string;
     ingredient: Ingredient;
     result: ItemStack;
     experience: number;
     cookingTime: number;
   }
+  | { id: "smoking"; group: string; ingredient: Ingredient; result: ItemStack; experience: number; cookingTime: number }
   | {
-    id: "minecraft:smoking";
+    id: "campfire_cooking";
     group: string;
     ingredient: Ingredient;
     result: ItemStack;
     experience: number;
     cookingTime: number;
   }
-  | {
-    id: "minecraft:campfire_cooking";
-    group: string;
-    ingredient: Ingredient;
-    result: ItemStack;
-    experience: number;
-    cookingTime: number;
-  }
-  | { id: "minecraft:stonecutting"; group: string; ingredient: Ingredient; result: ItemStack }
-  | { id: "minecraft:smithing"; base: Ingredient; addition: Ingredient; result: ItemStack };
+  | { id: "stonecutting"; group: string; ingredient: Ingredient; result: ItemStack }
+  | { id: "smithing"; base: Ingredient; addition: Ingredient; result: ItemStack };
 
 export type Ingredient = ItemStack[];
 
@@ -5518,12 +5545,12 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
   static read(reader: Reader) {
     const list: Recipe[] = [];
     for (let i = reader.readVarInt(); i--;) {
-      const serializerId = readResourceLocation(reader);
-      const id = readResourceLocation(reader);
+      const serializerId = ResourceLocation.from(reader.readString(32767));
+      const recipeId = ResourceLocation.from(reader.readString(32767));
       let result: RecipeSerializer;
-      switch (serializerId) {
-        case "minecraft:crafting_shaped": {
-          const id1 = "minecraft:crafting_shaped";
+      switch (serializerId.path) {
+        case "crafting_shaped": {
+          const id = "crafting_shaped";
           const width = reader.readVarInt();
           const height = reader.readVarInt();
           const group = reader.readString();
@@ -5533,11 +5560,11 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
             for (let i2 = reader.readVarInt(); i2--;) list2.push(readItemStack(reader));
             list1.push(list2);
           }
-          result = { id: id1, width, height, group, ingredients: list1, result: readItemStack(reader) };
+          result = { id, width, height, group, ingredients: list1, result: readItemStack(reader) };
           break;
         }
-        case "minecraft:crafting_shapeless": {
-          const id1 = "minecraft:crafting_shapeless";
+        case "crafting_shapeless": {
+          const id = "crafting_shapeless";
           const group = reader.readString();
           const list1: Ingredient[] = [];
           for (let i1 = reader.readVarInt(); i1--;) {
@@ -5545,55 +5572,55 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
             for (let i2 = reader.readVarInt(); i2--;) list2.push(readItemStack(reader));
             list1.push(list2);
           }
-          result = { id: id1, group, ingredients: list1, result: readItemStack(reader) };
+          result = { id, group, ingredients: list1, result: readItemStack(reader) };
           break;
         }
-        case "minecraft:crafting_special_armordye":
-          result = { id: "minecraft:crafting_special_armordye" };
+        case "crafting_special_armordye":
+          result = { id: "crafting_special_armordye" };
           break;
-        case "minecraft:crafting_special_bookcloning":
-          result = { id: "minecraft:crafting_special_bookcloning" };
+        case "crafting_special_bookcloning":
+          result = { id: "crafting_special_bookcloning" };
           break;
-        case "minecraft:crafting_special_mapcloning":
-          result = { id: "minecraft:crafting_special_mapcloning" };
+        case "crafting_special_mapcloning":
+          result = { id: "crafting_special_mapcloning" };
           break;
-        case "minecraft:crafting_special_mapextending":
-          result = { id: "minecraft:crafting_special_mapextending" };
+        case "crafting_special_mapextending":
+          result = { id: "crafting_special_mapextending" };
           break;
-        case "minecraft:crafting_special_firework_rocket":
-          result = { id: "minecraft:crafting_special_firework_rocket" };
+        case "crafting_special_firework_rocket":
+          result = { id: "crafting_special_firework_rocket" };
           break;
-        case "minecraft:crafting_special_firework_star":
-          result = { id: "minecraft:crafting_special_firework_star" };
+        case "crafting_special_firework_star":
+          result = { id: "crafting_special_firework_star" };
           break;
-        case "minecraft:crafting_special_firework_star_fade":
-          result = { id: "minecraft:crafting_special_firework_star_fade" };
+        case "crafting_special_firework_star_fade":
+          result = { id: "crafting_special_firework_star_fade" };
           break;
-        case "minecraft:crafting_special_tippedarrow":
-          result = { id: "minecraft:crafting_special_tippedarrow" };
+        case "crafting_special_tippedarrow":
+          result = { id: "crafting_special_tippedarrow" };
           break;
-        case "minecraft:crafting_special_bannerduplicate":
-          result = { id: "minecraft:crafting_special_bannerduplicate" };
+        case "crafting_special_bannerduplicate":
+          result = { id: "crafting_special_bannerduplicate" };
           break;
-        case "minecraft:crafting_special_shielddecoration":
-          result = { id: "minecraft:crafting_special_shielddecoration" };
+        case "crafting_special_shielddecoration":
+          result = { id: "crafting_special_shielddecoration" };
           break;
-        case "minecraft:crafting_special_shulkerboxcoloring":
-          result = { id: "minecraft:crafting_special_shulkerboxcoloring" };
+        case "crafting_special_shulkerboxcoloring":
+          result = { id: "crafting_special_shulkerboxcoloring" };
           break;
-        case "minecraft:crafting_special_suspiciousstew":
-          result = { id: "minecraft:crafting_special_suspiciousstew" };
+        case "crafting_special_suspiciousstew":
+          result = { id: "crafting_special_suspiciousstew" };
           break;
-        case "minecraft:crafting_special_repairitem":
-          result = { id: "minecraft:crafting_special_repairitem" };
+        case "crafting_special_repairitem":
+          result = { id: "crafting_special_repairitem" };
           break;
-        case "minecraft:smelting": {
-          const id1 = "minecraft:smelting";
+        case "smelting": {
+          const id = "smelting";
           const group = reader.readString();
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
           result = {
-            id: id1,
+            id,
             group,
             ingredient: list1,
             result: readItemStack(reader),
@@ -5602,13 +5629,13 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           };
           break;
         }
-        case "minecraft:blasting": {
-          const id1 = "minecraft:blasting";
+        case "blasting": {
+          const id = "blasting";
           const group = reader.readString();
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
           result = {
-            id: id1,
+            id,
             group,
             ingredient: list1,
             result: readItemStack(reader),
@@ -5617,13 +5644,13 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           };
           break;
         }
-        case "minecraft:smoking": {
-          const id1 = "minecraft:smoking";
+        case "smoking": {
+          const id = "smoking";
           const group = reader.readString();
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
           result = {
-            id: id1,
+            id,
             group,
             ingredient: list1,
             result: readItemStack(reader),
@@ -5632,13 +5659,13 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           };
           break;
         }
-        case "minecraft:campfire_cooking": {
-          const id1 = "minecraft:campfire_cooking";
+        case "campfire_cooking": {
+          const id = "campfire_cooking";
           const group = reader.readString();
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
           result = {
-            id: id1,
+            id,
             group,
             ingredient: list1,
             result: readItemStack(reader),
@@ -5647,27 +5674,27 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           };
           break;
         }
-        case "minecraft:stonecutting": {
-          const id1 = "minecraft:stonecutting";
+        case "stonecutting": {
+          const id = "stonecutting";
           const group = reader.readString();
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
-          result = { id: id1, group, ingredient: list1, result: readItemStack(reader) };
+          result = { id, group, ingredient: list1, result: readItemStack(reader) };
           break;
         }
-        case "minecraft:smithing": {
-          const id1 = "minecraft:smithing";
+        case "smithing": {
+          const id = "smithing";
           const list1: Ingredient = [];
           for (let i1 = reader.readVarInt(); i1--;) list1.push(readItemStack(reader));
           const list2: Ingredient = [];
           for (let i2 = reader.readVarInt(); i2--;) list2.push(readItemStack(reader));
-          result = { id: id1, base: list1, addition: list2, result: readItemStack(reader) };
+          result = { id, base: list1, addition: list2, result: readItemStack(reader) };
           break;
         }
         default:
           throw new Error("Invalid tag id");
       }
-      list.push({ id, serializer: result });
+      list.push({ recipeId, serializer: result });
     }
     const recipes = list;
     return new this(recipes);
@@ -5675,10 +5702,10 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
   write(writer: Writer) {
     writer.writeVarInt(this.recipes.length);
     for (const item of this.recipes) {
-      writeResourceLocation(writer, item.serializer.id);
-      writeResourceLocation(writer, item.id);
+      writer.writeString(new ResourceLocation("minecraft", item.serializer.id).toString());
+      writer.writeString(item.recipeId.toString());
       switch (item.serializer.id) {
-        case "minecraft:crafting_shaped": {
+        case "crafting_shaped": {
           writer.writeVarInt(item.serializer.width);
           writer.writeVarInt(item.serializer.height);
           writer.writeString(item.serializer.group);
@@ -5689,7 +5716,7 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writeItemStack(writer, item.serializer.result);
           break;
         }
-        case "minecraft:crafting_shapeless": {
+        case "crafting_shapeless": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredients.length);
           for (const item1 of item.serializer.ingredients) {
@@ -5699,46 +5726,46 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writeItemStack(writer, item.serializer.result);
           break;
         }
-        case "minecraft:crafting_special_armordye": {
+        case "crafting_special_armordye": {
           break;
         }
-        case "minecraft:crafting_special_bookcloning": {
+        case "crafting_special_bookcloning": {
           break;
         }
-        case "minecraft:crafting_special_mapcloning": {
+        case "crafting_special_mapcloning": {
           break;
         }
-        case "minecraft:crafting_special_mapextending": {
+        case "crafting_special_mapextending": {
           break;
         }
-        case "minecraft:crafting_special_firework_rocket": {
+        case "crafting_special_firework_rocket": {
           break;
         }
-        case "minecraft:crafting_special_firework_star": {
+        case "crafting_special_firework_star": {
           break;
         }
-        case "minecraft:crafting_special_firework_star_fade": {
+        case "crafting_special_firework_star_fade": {
           break;
         }
-        case "minecraft:crafting_special_tippedarrow": {
+        case "crafting_special_tippedarrow": {
           break;
         }
-        case "minecraft:crafting_special_bannerduplicate": {
+        case "crafting_special_bannerduplicate": {
           break;
         }
-        case "minecraft:crafting_special_shielddecoration": {
+        case "crafting_special_shielddecoration": {
           break;
         }
-        case "minecraft:crafting_special_shulkerboxcoloring": {
+        case "crafting_special_shulkerboxcoloring": {
           break;
         }
-        case "minecraft:crafting_special_suspiciousstew": {
+        case "crafting_special_suspiciousstew": {
           break;
         }
-        case "minecraft:crafting_special_repairitem": {
+        case "crafting_special_repairitem": {
           break;
         }
-        case "minecraft:smelting": {
+        case "smelting": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredient.length);
           for (const item1 of item.serializer.ingredient) writeItemStack(writer, item1);
@@ -5747,7 +5774,7 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writer.writeVarInt(item.serializer.cookingTime);
           break;
         }
-        case "minecraft:blasting": {
+        case "blasting": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredient.length);
           for (const item1 of item.serializer.ingredient) writeItemStack(writer, item1);
@@ -5756,7 +5783,7 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writer.writeVarInt(item.serializer.cookingTime);
           break;
         }
-        case "minecraft:smoking": {
+        case "smoking": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredient.length);
           for (const item1 of item.serializer.ingredient) writeItemStack(writer, item1);
@@ -5765,7 +5792,7 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writer.writeVarInt(item.serializer.cookingTime);
           break;
         }
-        case "minecraft:campfire_cooking": {
+        case "campfire_cooking": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredient.length);
           for (const item1 of item.serializer.ingredient) writeItemStack(writer, item1);
@@ -5774,14 +5801,14 @@ export class ClientboundUpdateRecipesPacket implements Packet<ClientGameHandler>
           writer.writeVarInt(item.serializer.cookingTime);
           break;
         }
-        case "minecraft:stonecutting": {
+        case "stonecutting": {
           writer.writeString(item.serializer.group);
           writer.writeVarInt(item.serializer.ingredient.length);
           for (const item1 of item.serializer.ingredient) writeItemStack(writer, item1);
           writeItemStack(writer, item.serializer.result);
           break;
         }
-        case "minecraft:smithing": {
+        case "smithing": {
           writer.writeVarInt(item.serializer.base.length);
           for (const item1 of item.serializer.base) writeItemStack(writer, item1);
           writer.writeVarInt(item.serializer.addition.length);
@@ -5806,10 +5833,10 @@ export class ClientboundUpdateTagsPacket implements Packet<ClientGameHandler> {
   static read(reader: Reader) {
     const map: Map<ResourceLocation, Map<ResourceLocation, number[]>> = new Map();
     for (let i = reader.readVarInt(); i--;) {
-      const key = readResourceLocation(reader);
+      const key = ResourceLocation.from(reader.readString(32767));
       const map1: Map<ResourceLocation, number[]> = new Map();
       for (let i1 = reader.readVarInt(); i1--;) {
-        const key1 = readResourceLocation(reader);
+        const key1 = ResourceLocation.from(reader.readString(32767));
         const list: number[] = [];
         for (let i2 = reader.readVarInt(); i2--;) list.push(reader.readVarInt());
         const value1 = list;
@@ -5824,10 +5851,10 @@ export class ClientboundUpdateTagsPacket implements Packet<ClientGameHandler> {
   write(writer: Writer) {
     writer.writeVarInt(this.tags.size);
     for (const [key, value] of this.tags) {
-      writeResourceLocation(writer, key);
+      writer.writeString(key.toString());
       writer.writeVarInt(value.size);
       for (const [key1, value1] of value) {
-        writeResourceLocation(writer, key1);
+        writer.writeString(key1.toString());
         writer.writeVarInt(value1.length);
         for (const item of value1) writer.writeVarInt(item);
       }

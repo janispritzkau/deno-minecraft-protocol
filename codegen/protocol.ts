@@ -1,8 +1,8 @@
-import * as path from "https://deno.land/std@0.166.0/path/mod.ts";
 import * as fs from "https://deno.land/std@0.166.0/fs/mod.ts";
+import * as path from "https://deno.land/std@0.166.0/path/mod.ts";
 
-import { createTypeContext, TypeContext, Variable } from "./type_context.ts";
 import { AliasedType, DocumentedType, ExportedType, Type } from "./type.ts";
+import { createTypeContext, TypeContext, Variable } from "./type_context.ts";
 import { format, formatDocComment } from "./utils.ts";
 
 export type Flow = "serverbound" | "clientbound";

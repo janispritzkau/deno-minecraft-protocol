@@ -12,7 +12,7 @@ import {
   Struct,
   TaggedUnion,
   Uuid,
-  VarInt,
+  VarInt
 } from "../types.ts";
 
 import { GameProfile, ProfilePublicKey, ResourceLocation } from "../protocol_types.ts";
@@ -26,7 +26,7 @@ packet("ClientboundLoginDisconnectPacket", {
 });
 
 packet("ClientboundHelloPacket", {
-  serverId: String(20),
+  serverId: ByteArray(20),
   publicKey: ByteArray(),
   nonce: ByteArray(),
 });
@@ -48,7 +48,7 @@ packet("ClientboundCustomQueryPacket", {
 flow("serverbound");
 
 packet("ServerboundHelloPacket", {
-  name: String(16),
+  profileName: String(16),
   publicKey: Optional(ProfilePublicKey),
   profileId: Optional(Uuid),
 });

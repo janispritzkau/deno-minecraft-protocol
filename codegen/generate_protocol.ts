@@ -15,6 +15,7 @@ await generate("network/protocol", {
     "minecraft/network/packet.ts": ["Packet", "PacketHandler"],
     "minecraft/network/protocol.ts": ["Protocol"],
     "./core/uuid.ts": ["Uuid"],
+    "./core/resource_location.ts": ["ResourceLocation"],
     "./chat/component.ts": ["Component"],
     "./network/protocol/status/server_status.ts": [
       "ServerStatus",

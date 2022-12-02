@@ -303,18 +303,18 @@ export class MapType extends Type {
   }
 }
 
-const ENUM_MAPPER_FACTORY = /* ts */ `\
-function createEnumMapper<T extends string>(keyIds: Record<T, number>) {
+const ENUM_MAPPER_FACTORY = `\
+function createEnumMapper<T extends string>(keyIds: Record<T, number>, defaultKey?: T) {
   const idKeys = new Map(Object.entries(keyIds).map(([key, id]) => [id, key] as [number, T]));
   return {
     toId(key: T): number {
       const id = keyIds[key];
-      if (id == null) throw new Error("Invalid enum key" + key);
+      if (id == null) throw new Error(\`Invalid enum key '\${key}'\`);
       return id;
     },
     fromId(id: number): T {
-      const key = idKeys.get(id);
-      if (key == null) throw new Error("Invalid enum id" + id);
+      const key = idKeys.get(id) ?? defaultKey;
+      if (key == null) throw new Error(\`Invalid enum id \${id}\`);
       return key;
     },
   };
@@ -324,7 +324,11 @@ function createEnumMapper<T extends string>(keyIds: Record<T, number>) {
 export class EnumType extends Type {
   private mapper: symbol;
 
-  constructor(private value: Type, private variants: Record<string, number>) {
+  constructor(
+    private value: Type,
+    private variants: Record<string, number>,
+    private defaultKey?: string,
+  ) {
     super();
     this.value = value;
     this.variants = variants;
@@ -369,8 +373,12 @@ export class EnumType extends Type {
           : `{ ${
             Object.entries(this.variants).map(([k, v]) => JSON.stringify(k) + ": " + v).join(", ")
           } }`
-      })`,
+      }${this.defaultKey ? ", " + JSON.stringify(this.defaultKey) : ""})`,
     );
+  }
+
+  default(key: string) {
+    return new EnumType(this.value, this.variants, key);
   }
 }
 

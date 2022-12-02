@@ -18,17 +18,17 @@ import {
   String,
   Struct,
   TaggedUnion,
-  UnsignedByte,
   Uuid,
   VarInt,
   VarLong,
 } from "../../types.ts";
-import { MobEffect } from "../../registry_types.ts";
+
 import {
   ArgumentSignatures,
   BlockPos,
   ChatVisiblity,
   ClickType,
+  Difficulty,
   Direction,
   HumanoidArm,
   InteractionHand,
@@ -38,11 +38,12 @@ import {
   RecipeBookType,
   ResourceLocation,
 } from "../../protocol_types.ts";
+import { MobEffect } from "../../registry_types.ts";
 
 flow("serverbound");
 
 packet("ServerboundAcceptTeleportationPacket", {
-  id: VarInt,
+  teleportId: VarInt,
 });
 
 packet("ServerboundBlockEntityTagQueryPacket", {
@@ -51,7 +52,7 @@ packet("ServerboundBlockEntityTagQueryPacket", {
 });
 
 packet("ServerboundChangeDifficultyPacket", {
-  difficulty: UnsignedByte,
+  difficulty: Difficulty,
 });
 
 packet("ServerboundChatAckPacket", {
@@ -60,7 +61,7 @@ packet("ServerboundChatAckPacket", {
 
 packet("ServerboundChatCommandPacket", {
   command: String(256),
-  timeStamp: Long,
+  timestamp: Long,
   salt: Long,
   argumentSignatures: ArgumentSignatures,
   signedPreview: Boolean,
@@ -69,7 +70,7 @@ packet("ServerboundChatCommandPacket", {
 
 packet("ServerboundChatPacket", {
   message: String(256),
-  timeStamp: Long,
+  timestamp: Long,
   salt: Long,
   signature: ByteArray().alias("MessageSignature"),
   signedPreview: Boolean,
@@ -244,7 +245,7 @@ packet("ServerboundPlayerCommandPacket", {
 packet("ServerboundPlayerInputPacket", {
   xxa: Float,
   zza: Float,
-  fields: BitFlags(Byte, {
+  flags: BitFlags(Byte, {
     isJumping: 0x01,
     isShiftKeyDown: 0x02,
   }),
@@ -285,12 +286,12 @@ packet("ServerboundSeenAdvancementsPacket", {
 });
 
 packet("ServerboundSelectTradePacket", {
-  item: VarInt,
+  offerIndex: VarInt,
 });
 
 packet("ServerboundSetBeaconPacket", {
-  primary: Optional(MobEffect),
-  secondary: Optional(MobEffect),
+  primaryEffect: Optional(MobEffect),
+  secondaryEffect: Optional(MobEffect),
 });
 
 packet("ServerboundSetCarriedItemPacket", {
@@ -301,7 +302,7 @@ packet("ServerboundSetCommandBlockPacket", {
   pos: BlockPos,
   command: String(),
   mode: Enum(["sequence", "auto", "redstone"]).alias("CommandBlockMode"),
-  fields: BitFlags(Byte, {
+  flags: BitFlags(Byte, {
     trackOutput: 0x01,
     conditional: 0x02,
     automatic: 0x04,
@@ -384,7 +385,7 @@ packet("ServerboundSwingPacket", {
 });
 
 packet("ServerboundTeleportToEntityPacket", {
-  uuid: Uuid,
+  entityUuid: Uuid,
 });
 
 packet("ServerboundUseItemOnPacket", {
@@ -392,10 +393,12 @@ packet("ServerboundUseItemOnPacket", {
   blockHit: Struct({
     blockPos: BlockPos,
     direction: Direction,
-    location: Struct({ x: Float, y: Float, z: Float }).doc(
-      "Position relative to the block's origin.",
-    ),
-    inside: Boolean,
+    location: Struct({
+      x: Float,
+      y: Float,
+      z: Float,
+    }).doc("Position relative to the block's origin."),
+    isInside: Boolean,
   }).alias("BlockHitResult"),
   sequence: VarInt,
 });

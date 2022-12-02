@@ -1,6 +1,7 @@
 // deno-lint-ignore-file
 import { Reader, Writer } from "minecraft/io/mod.ts";
 import { CompoundTag } from "minecraft/nbt/tag.ts";
+import { ResourceLocation } from "../../core/resource_location.ts";
 import { Uuid } from "../../core/uuid.ts";
 import { Component } from "../../chat/component.ts";
 
@@ -13,17 +14,17 @@ export type ChatType =
   | "minecraft:team_msg_command_outgoing"
   | "minecraft:emote_command";
 
-export function createEnumMapper<T extends string>(keyIds: Record<T, number>) {
+export function createEnumMapper<T extends string>(keyIds: Record<T, number>, defaultKey?: T) {
   const idKeys = new Map(Object.entries(keyIds).map(([key, id]) => [id, key] as [number, T]));
   return {
     toId(key: T): number {
       const id = keyIds[key];
-      if (id == null) throw new Error("Invalid enum key" + key);
+      if (id == null) throw new Error(`Invalid enum key '${key}'`);
       return id;
     },
     fromId(id: number): T {
-      const key = idKeys.get(id);
-      if (key == null) throw new Error("Invalid enum id" + id);
+      const key = idKeys.get(id) ?? defaultKey;
+      if (key == null) throw new Error(`Invalid enum id ${id}`);
       return key;
     },
   };
@@ -4047,16 +4048,6 @@ export const customStatEnum = createEnumMapper<CustomStat>(
   ),
 );
 
-export type ResourceLocation = string;
-
-export function readResourceLocation(reader: Reader): ResourceLocation {
-  return reader.readString(32767);
-}
-
-export function writeResourceLocation(writer: Writer, value: ResourceLocation) {
-  writer.writeString(value);
-}
-
 export type BlockPos = { x: number; y: number; z: number };
 
 export function readBlockPos(reader: Reader): BlockPos {
@@ -4155,11 +4146,11 @@ export type GlobalPos = { dimension: Dimension; pos: BlockPos };
 export type Dimension = ResourceLocation;
 
 export function readGlobalPos(reader: Reader): GlobalPos {
-  return { dimension: readResourceLocation(reader), pos: readBlockPos(reader) };
+  return { dimension: ResourceLocation.from(reader.readString(32767)), pos: readBlockPos(reader) };
 }
 
 export function writeGlobalPos(writer: Writer, value: GlobalPos) {
-  writeResourceLocation(writer, value.dimension);
+  writer.writeString(value.dimension.toString());
   writeBlockPos(writer, value.pos);
 }
 
@@ -4197,51 +4188,57 @@ export function writeGameProfile(writer: Writer, value: GameProfile) {
   writeProperties(writer, value.properties);
 }
 
-export type ProfilePublicKey = { expiresAt: bigint; key: Uint8Array; keySignature: Uint8Array };
+export type ProfilePublicKey = { expiresAt: Date; key: Uint8Array; keySignature: Uint8Array };
 
 export function readProfilePublicKey(reader: Reader): ProfilePublicKey {
-  return { expiresAt: reader.readLong(), key: reader.readByteArray(), keySignature: reader.readByteArray(4096) };
+  return {
+    expiresAt: new Date(Number(reader.readLong())),
+    key: reader.readByteArray(),
+    keySignature: reader.readByteArray(4096),
+  };
 }
 
 export function writeProfilePublicKey(writer: Writer, value: ProfilePublicKey) {
-  writer.writeLong(value.expiresAt);
+  writer.writeLong(BigInt(value.expiresAt.getTime()));
   writer.writeByteArray(value.key);
   writer.writeByteArray(value.keySignature);
 }
 
-export type ChunkData = {
-  heightmaps: CompoundTag | null;
-  buffer: Uint8Array;
-  blockEntitiesData: { x: number; z: number; y: number; type: BlockEntityType; tag: CompoundTag | null }[];
-};
+export type ChunkBlockEntity = { x: number; z: number; y: number; type: BlockEntityType; tag: CompoundTag | null };
+
+export function readChunkBlockEntity(reader: Reader): ChunkBlockEntity {
+  const p = reader.readByte();
+  return {
+    x: (p >> 4 & 0xf) << 28 >> 28,
+    z: (p >> 0 & 0xf) << 28 >> 28,
+    y: reader.readShort(),
+    type: blockEntityTypeEnum.fromId(reader.readVarInt()),
+    tag: reader.readCompoundTag(),
+  };
+}
+
+export function writeChunkBlockEntity(writer: Writer, value: ChunkBlockEntity) {
+  writer.writeByte((value.x & 0xf) << 4 | (value.z & 0xf) << 0);
+  writer.writeShort(value.y);
+  writer.writeVarInt(blockEntityTypeEnum.toId(value.type));
+  writer.writeCompoundTag(value.tag);
+}
+
+export type ChunkData = { heightmaps: CompoundTag | null; data: Uint8Array; blockEntities: ChunkBlockEntity[] };
 
 export function readChunkData(reader: Reader): ChunkData {
   const heightmaps = reader.readCompoundTag();
-  const buffer = reader.readByteArray();
-  const list: { x: number; z: number; y: number; type: BlockEntityType; tag: CompoundTag | null }[] = [];
-  for (let i = reader.readVarInt(); i--;) {
-    const p = reader.readByte();
-    list.push({
-      x: (p >> 4 & 0xf) << 28 >> 28,
-      z: (p >> 0 & 0xf) << 28 >> 28,
-      y: reader.readShort(),
-      type: blockEntityTypeEnum.fromId(reader.readVarInt()),
-      tag: reader.readCompoundTag(),
-    });
-  }
-  return { heightmaps, buffer, blockEntitiesData: list };
+  const data = reader.readByteArray();
+  const list: ChunkBlockEntity[] = [];
+  for (let i = reader.readVarInt(); i--;) list.push(readChunkBlockEntity(reader));
+  return { heightmaps, data, blockEntities: list };
 }
 
 export function writeChunkData(writer: Writer, value: ChunkData) {
   writer.writeCompoundTag(value.heightmaps);
-  writer.writeByteArray(value.buffer);
-  writer.writeVarInt(value.blockEntitiesData.length);
-  for (const item of value.blockEntitiesData) {
-    writer.writeByte((item.x & 0xf) << 4 | (item.z & 0xf) << 0);
-    writer.writeShort(item.y);
-    writer.writeVarInt(blockEntityTypeEnum.toId(item.type));
-    writer.writeCompoundTag(item.tag);
-  }
+  writer.writeByteArray(value.data);
+  writer.writeVarInt(value.blockEntities.length);
+  for (const item of value.blockEntities) writeChunkBlockEntity(writer, item);
 }
 
 export type LightData = {
@@ -4281,7 +4278,7 @@ export function writeLightData(writer: Writer, value: LightData) {
 
 export type PositionSource =
   | { type: "minecraft:block"; pos: BlockPos }
-  | { type: "minecraft:entity"; id: number; yOffset: number };
+  | { type: "minecraft:entity"; entityId: number; yOffset: number };
 
 export function readPositionSource(reader: Reader): PositionSource {
   let result: PositionSource;
@@ -4290,7 +4287,7 @@ export function readPositionSource(reader: Reader): PositionSource {
       result = { type: "minecraft:block", pos: readBlockPos(reader) };
       break;
     case "minecraft:entity":
-      result = { type: "minecraft:entity", id: reader.readVarInt(), yOffset: reader.readFloat() };
+      result = { type: "minecraft:entity", entityId: reader.readVarInt(), yOffset: reader.readFloat() };
       break;
     default:
       throw new Error("Invalid tag id");
@@ -4307,7 +4304,7 @@ export function writePositionSource(writer: Writer, value: PositionSource) {
     }
     case "minecraft:entity": {
       writer.writeString("minecraft:entity");
-      writer.writeVarInt(value.id);
+      writer.writeVarInt(value.entityId);
       writer.writeFloat(value.yOffset);
       break;
     }
@@ -4525,10 +4522,10 @@ export function readCommandArgument(reader: Reader): CommandArgument {
       result = { type: "time" };
       break;
     case 43:
-      result = { type: "resource_or_tag", registryKey: readResourceLocation(reader) };
+      result = { type: "resource_or_tag", registryKey: ResourceLocation.from(reader.readString(32767)) };
       break;
     case 44:
-      result = { type: "resource", registryKey: readResourceLocation(reader) };
+      result = { type: "resource", registryKey: ResourceLocation.from(reader.readString(32767)) };
       break;
     case 45:
       result = { type: "template_mirror" };
@@ -4752,12 +4749,12 @@ export function writeCommandArgument(writer: Writer, value: CommandArgument) {
     }
     case "resource_or_tag": {
       writer.writeVarInt(43);
-      writeResourceLocation(writer, value.registryKey);
+      writer.writeString(value.registryKey.toString());
       break;
     }
     case "resource": {
       writer.writeVarInt(44);
-      writeResourceLocation(writer, value.registryKey);
+      writer.writeString(value.registryKey.toString());
       break;
     }
     case "template_mirror": {
@@ -4796,7 +4793,7 @@ export function readCommandNodeStub(reader: Reader): CommandNodeStub {
         type: "argument",
         id: reader.readString(),
         argument: readCommandArgument(reader),
-        suggestionId: reader.readBoolean() ? readResourceLocation(reader) : null,
+        suggestionId: reader.readBoolean() ? ResourceLocation.from(reader.readString(32767)) : null,
       };
       break;
     default:
@@ -4821,7 +4818,7 @@ export function writeCommandNodeStub(writer: Writer, value: CommandNodeStub) {
       writer.writeString(value.id);
       writeCommandArgument(writer, value.argument);
       writer.writeBoolean(value.suggestionId != null);
-      if (value.suggestionId != null) writeResourceLocation(writer, value.suggestionId);
+      if (value.suggestionId != null) writer.writeString(value.suggestionId.toString());
       break;
     }
     default:
@@ -4853,7 +4850,7 @@ export function readCommandNode(reader: Reader): CommandNode {
       type: "argument",
       id: id,
       argument: argument,
-      suggestionId: ((flags & 0x10) != 0) ? readResourceLocation(reader) : null,
+      suggestionId: ((flags & 0x10) != 0) ? ResourceLocation.from(reader.readString(32767)) : null,
     };
   } else {
     node = { type: "root" };
@@ -4886,14 +4883,12 @@ export function writeCommandNode(writer: Writer, value: CommandNode) {
     writer.writeString(value.node.id);
     writeCommandArgument(writer, value.node.argument);
     if (value.node.suggestionId != null) {
-      writeResourceLocation(writer, value.node.suggestionId);
+      writer.writeString(value.node.suggestionId.toString());
     }
   }
 }
 
-export type SignedMessageHeader = { previousSignature: MessageSignature | null; sender: Uuid };
-
-export type MessageSignature = Uint8Array;
+export type SignedMessageHeader = { previousSignature: Uint8Array | null; sender: Uuid };
 
 export function readSignedMessageHeader(reader: Reader): SignedMessageHeader {
   return {
@@ -4923,26 +4918,15 @@ export function writeChatMessageContent(writer: Writer, value: ChatMessageConten
   if (value.decorated != null) writer.writeJson(value.decorated.serialize());
 }
 
-export type Instant = bigint;
-
-export function readInstant(reader: Reader): Instant {
-  return reader.readLong();
-}
-
-export function writeInstant(writer: Writer, value: Instant) {
-  writer.writeLong(value);
-}
-
-export type LastSeenMessagesEntry = { profileId: Uuid; lastSignature: MessageSignature | null };
+export type LastSeenMessagesEntry = { profileId: Uuid; lastSignature: Uint8Array };
 
 export function readLastSeenMessagesEntry(reader: Reader): LastSeenMessagesEntry {
-  return { profileId: Uuid.from(reader.read(16)), lastSignature: reader.readBoolean() ? reader.readByteArray() : null };
+  return { profileId: Uuid.from(reader.read(16)), lastSignature: reader.readByteArray() };
 }
 
 export function writeLastSeenMessagesEntry(writer: Writer, value: LastSeenMessagesEntry) {
   writer.write(value.profileId.bytes());
-  writer.writeBoolean(value.lastSignature != null);
-  if (value.lastSignature != null) writer.writeByteArray(value.lastSignature);
+  writer.writeByteArray(value.lastSignature);
 }
 
 export type LastSeenMessagesUpdate = { lastSeen: LastSeenMessagesEntry[]; lastReceived: LastSeenMessagesEntry | null };
@@ -4962,23 +4946,23 @@ export function writeLastSeenMessagesUpdate(writer: Writer, value: LastSeenMessa
 
 export type SignedMessageBody = {
   content: ChatMessageContent;
-  timeStamp: Instant;
+  timestamp: bigint;
   salt: bigint;
   lastSeen: LastSeenMessagesEntry[];
 };
 
 export function readSignedMessageBody(reader: Reader): SignedMessageBody {
   const content = readChatMessageContent(reader);
-  const timeStamp = readInstant(reader);
+  const timestamp = reader.readLong();
   const salt = reader.readLong();
   const list: LastSeenMessagesEntry[] = [];
   for (let i = reader.readVarInt(); i--;) list.push(readLastSeenMessagesEntry(reader));
-  return { content, timeStamp, salt, lastSeen: list };
+  return { content, timestamp, salt, lastSeen: list };
 }
 
 export function writeSignedMessageBody(writer: Writer, value: SignedMessageBody) {
   writeChatMessageContent(writer, value.content);
-  writeInstant(writer, value.timeStamp);
+  writer.writeLong(value.timestamp);
   writer.writeLong(value.salt);
   writer.writeVarInt(value.lastSeen.length);
   for (const item of value.lastSeen) writeLastSeenMessagesEntry(writer, item);
@@ -5029,51 +5013,7 @@ export function writeFilterMask(writer: Writer, value: FilterMask) {
   }
 }
 
-export type PlayerChatMessage = {
-  signedHeader: SignedMessageHeader;
-  headerSignature: MessageSignature;
-  signedBody: SignedMessageBody;
-  unsignedContent: Component | null;
-  filterMask: FilterMask;
-};
-
-export function readPlayerChatMessage(reader: Reader): PlayerChatMessage {
-  return {
-    signedHeader: readSignedMessageHeader(reader),
-    headerSignature: reader.readByteArray(),
-    signedBody: readSignedMessageBody(reader),
-    unsignedContent: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
-    filterMask: readFilterMask(reader),
-  };
-}
-
-export function writePlayerChatMessage(writer: Writer, value: PlayerChatMessage) {
-  writeSignedMessageHeader(writer, value.signedHeader);
-  writer.writeByteArray(value.headerSignature);
-  writeSignedMessageBody(writer, value.signedBody);
-  writer.writeBoolean(value.unsignedContent != null);
-  if (value.unsignedContent != null) writer.writeJson(value.unsignedContent.serialize());
-  writeFilterMask(writer, value.filterMask);
-}
-
-export type ChatTypeBound = { chatType: ChatType; name: Component; targetName: Component | null };
-
-export function readChatTypeBound(reader: Reader): ChatTypeBound {
-  return {
-    chatType: chatTypeEnum.fromId(reader.readVarInt()),
-    name: Component.deserialize(reader.readJson()),
-    targetName: reader.readBoolean() ? Component.deserialize(reader.readJson()) : null,
-  };
-}
-
-export function writeChatTypeBound(writer: Writer, value: ChatTypeBound) {
-  writer.writeVarInt(chatTypeEnum.toId(value.chatType));
-  writer.writeJson(value.name.serialize());
-  writer.writeBoolean(value.targetName != null);
-  if (value.targetName != null) writer.writeJson(value.targetName.serialize());
-}
-
-export type ArgumentSignatureEntry = { name: string; signature: MessageSignature };
+export type ArgumentSignatureEntry = { name: string; signature: Uint8Array };
 
 export function readArgumentSignatureEntry(reader: Reader): ArgumentSignatureEntry {
   return { name: reader.readString(16), signature: reader.readByteArray() };
@@ -5206,5 +5146,5 @@ export const chatFormattingEnum = createEnumMapper<ChatFormatting>({
   "strikethrough": 18,
   "underline": 19,
   "italic": 20,
-  "reset": -1,
+  "reset": 21,
 });

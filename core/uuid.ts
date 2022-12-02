@@ -19,7 +19,8 @@ export class Uuid {
       if (uuid.length != 16) {
         throw new Error("Uint8Array must be 16 bytes to be converted to UUID");
       }
-      return new Uuid(uuid.reduce((value, byte) => value << 8n | BigInt(byte), 0n));
+      const view = new DataView(uuid.buffer, uuid.byteOffset, uuid.byteLength);
+      return new Uuid(view.getBigUint64(0) << 64n | view.getBigUint64(8));
     }
     if (typeof uuid == "bigint") return new Uuid(uuid);
     if (!UUID_REGEX.test(uuid)) throw new Error("UUID has invalid format");
@@ -49,10 +50,10 @@ export class Uuid {
   }
 
   toString(): string {
-    return this.hex(true);
+    return this.hex();
   }
 
   [Symbol.for("Deno.customInspect")](inspect: typeof Deno.inspect, options: Deno.InspectOptions) {
-    return `Uuid(${inspect(this.toString(), { colors: options.colors })})`;
+    return `Uuid(${inspect(this.hex(true), { colors: options.colors })})`;
   }
 }
