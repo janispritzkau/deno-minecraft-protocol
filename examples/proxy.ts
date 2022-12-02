@@ -1,26 +1,32 @@
-// deno-lint-ignore-file
-
-import * as flags from "https://deno.land/std@0.166.0/flags/mod.ts";
-import * as C from "https://deno.land/std@0.166.0/fmt/colors.ts";
-import { equals } from "https://deno.land/std@0.166.0/bytes/equals.ts";
-import { assertEquals } from "https://deno.land/std@0.166.0/testing/asserts.ts";
-import { Component } from "../chat/component.ts";
+import { parse } from "https://deno.land/std@0.166.0/flags/mod.ts";
 import {
-  Connection,
-  Packet,
-  PacketHandler,
+  bold,
+  cyan,
+  getColorEnabled,
+  gray,
+  green,
+  red,
+  setColorEnabled,
+} from "https://deno.land/std@0.166.0/fmt/colors.ts";
+import { hashServerId } from "minecraft/crypto/mod.ts";
+import { encryptRsaPkcs1, importRsaPublicKey, signRsaPkcs1Sha256 } from "minecraft/crypto/rsa.ts";
+import { Writer } from "minecraft/io/writer.ts";
+import {
   parseServerAddress,
-  Protocol,
+  ResolvedAddress,
   resolveServerAddress,
-  ServerAddress,
-} from "minecraft/network/mod.ts";
+} from "minecraft/network/address.ts";
+import { Connection } from "minecraft/network/connection.ts";
+import { Packet, PacketHandler } from "minecraft/network/packet.ts";
+import { Protocol } from "minecraft/network/protocol.ts";
+import { Component } from "../chat/component.ts";
+import { Uuid } from "../core/uuid.ts";
 import {
   ClientboundAddEntityPacket,
   ClientboundForgetLevelChunkPacket,
-  ClientboundGameProfilePacket,
   ClientboundLevelChunkWithLightPacket,
+  ClientboundLevelParticlesPacket,
   ClientboundLightUpdatePacket,
-  ClientboundLoginCompressionPacket,
   ClientboundLoginDisconnectPacket,
   ClientboundMoveEntityPosPacket,
   ClientboundMoveEntityPosRotPacket,
@@ -34,22 +40,103 @@ import {
   gameProtocol,
   handshakeProtocol,
   loginProtocol,
+  ServerboundHelloPacket,
+  ServerboundKeyPacket,
   ServerboundMovePlayerPosPacket,
   ServerboundMovePlayerPosRotPacket,
   ServerboundMovePlayerRotPacket,
   statusProtocol,
 } from "../network/protocol/mod.ts";
+import { getProfile, Profile } from "./_utils/auth.ts";
+import { getProfileKeys } from "./_utils/keys.ts";
 
-if (!Deno.isatty(Deno.stdout.rid)) C.setColorEnabled(false);
+if (!Deno.isatty(Deno.stdout.rid)) setColorEnabled(false);
 
+const HELP = `
+USAGE:
+    proxy [OPTIONS] <address>
+
+ARGS:
+    <address>
+        The address the proxy will connect to
+
+OPTIONS:
+    --port <port>
+        Port the proxy server will listen on (default: 25566)
+    --hostname <host>
+        Listen on a specific hostname
+    --profile <name>
+        Profile name used for authentication
+`.trim();
+
+function help(errorMessage?: string): never {
+  if (errorMessage) console.error(red("error") + ":", errorMessage, "\n");
+  console.log(HELP);
+  Deno.exit(1);
+}
+
+async function main() {
+  const args = parse(Deno.args, {
+    string: ["port", "hostname", "profile"],
+    default: { port: 25566 },
+    boolean: ["help"],
+  });
+
+  if (args.help) help();
+
+  const serverAddress = parseServerAddress(args._[0]?.toString() ?? "localhost:25565");
+  const connectAddress = await resolveServerAddress(serverAddress.hostname, serverAddress.port);
+
+  console.log(
+    "using proxy address:",
+    bold(cyan(connectAddress.hostname + ":" + connectAddress.port)),
+  );
+
+  const profile = args.profile ? await getProfile(args.profile) : null;
+
+  const listener = Deno.listen({ hostname: args.hostname, port: Number(args.port) });
+  const listenAddr = listener.addr as Deno.NetAddr;
+  console.log(
+    "proxy server listening on:",
+    bold(cyan(listenAddr.hostname + ":" + listenAddr.port)),
+  );
+
+  for await (const denoConn of listener) {
+    const remoteNetAddr = denoConn.remoteAddr as Deno.NetAddr;
+    const remoteAddress = `${remoteNetAddr.hostname}:${remoteNetAddr.port}`;
+
+    console.log(new Date(), gray(remoteAddress), green("incoming connection"));
+    const conn = new Connection(denoConn);
+
+    let closedByServer = false;
+    handleConnection(
+      conn,
+      serverAddress.hostname,
+      connectAddress,
+      remoteAddress,
+      profile,
+    ).then((wasClosedByServer) => {
+      closedByServer = wasClosedByServer;
+    }).catch((e) => {
+      console.error("error in server connection handler:", e);
+    }).finally(() => {
+      if (!conn.closed) conn.close();
+      console.log(
+        new Date(),
+        gray(remoteAddress),
+        red("connection closed" + (closedByServer ? " by server" : "")),
+      );
+    });
+  }
+}
+
+const INSPECT_LINE_LIMIT = 100;
+
+// deno-lint-ignore ban-types
 const FILTERED_PACKETS = new Set<Function>([
   ServerboundMovePlayerPosPacket,
   ServerboundMovePlayerPosRotPacket,
   ServerboundMovePlayerRotPacket,
-
-  ClientboundLightUpdatePacket,
-  ClientboundLevelChunkWithLightPacket,
-  ClientboundForgetLevelChunkPacket,
   ClientboundAddEntityPacket,
   ClientboundMoveEntityPosPacket,
   ClientboundMoveEntityPosRotPacket,
@@ -59,189 +146,227 @@ const FILTERED_PACKETS = new Set<Function>([
   ClientboundTeleportEntityPacket,
   ClientboundUpdateAttributesPacket,
   ClientboundSetEntityDataPacket,
+  ClientboundLevelChunkWithLightPacket,
+  ClientboundLightUpdatePacket,
+  ClientboundForgetLevelChunkPacket,
+  ClientboundLevelParticlesPacket,
 ]);
 
-async function handleConnection(conn: Connection, address: ServerAddress, netAddr: string) {
-  const filteredPackets = new Map<Function, number>();
-  const packetFlow = new Map<Function, string>();
-
-  const log = (flow?: string, packet?: Packet) => {
-    if (packet && flow && FILTERED_PACKETS.has(packet.constructor)) {
-      packetFlow.set(packet.constructor, flow!);
-      filteredPackets.set(packet.constructor, (filteredPackets.get(packet.constructor) ?? 0) + 1);
-      return;
-    }
-
-    const internalLog = (flow: string, ...args: unknown[]) => {
-      console.log(new Date(), C.gray(netAddr), `${C.bold(C.white("[" + flow + "]"))}`, ...args);
-    };
-
-    if (filteredPackets.size > 0) {
-      for (const [constructor, count] of filteredPackets) {
-        internalLog(
-          packetFlow.get(constructor)!,
-          C.gray(constructor.name + (count > 1 ? C.bold(` x${count}`) : "")),
-        );
-      }
-      filteredPackets.clear();
-    }
-
-    if (packet && flow) {
-      internalLog(
-        flow,
-        Deno.inspect(packet, {
-          colors: C.getColorEnabled(),
-          depth: 6,
-          iterableLimit: 24,
-        }),
-      );
-    }
-  };
-
+async function handleConnection(
+  conn: Connection,
+  hostname: string,
+  connectAddress: ResolvedAddress,
+  remoteAddress: string,
+  profile: Profile | null,
+): Promise<boolean> {
   conn.setServerProtocol(handshakeProtocol);
   const handshake = await conn.receive();
-  if (!(handshake instanceof ClientIntentionPacket)) return;
+  if (!(handshake instanceof ClientIntentionPacket)) return false;
 
-  const connectAddr = await resolveServerAddress(address.hostname, address.port);
+  if (handshake.intention == "login" && handshake.protocolVersion != 760) {
+    conn.setServerProtocol(loginProtocol);
+    await conn.receive();
+    await conn.send(
+      new ClientboundLoginDisconnectPacket(
+        Component.literal("Unsupported protocol version"),
+      ),
+    );
+    return false;
+  }
 
-  const client = new Connection(await Deno.connect(connectAddr));
+  const client = new Connection(await Deno.connect(connectAddress));
   client.setClientProtocol(handshakeProtocol);
 
-  await client.send(
-    new ClientIntentionPacket(
-      handshake.protocolVersion,
-      address.hostname,
-      connectAddr.port,
-      handshake.intention,
-    ),
+  const modifiedHandshake = new ClientIntentionPacket(
+    handshake.protocolVersion,
+    hostname,
+    connectAddress.port,
+    handshake.intention,
   );
 
-  log("C -> S", handshake);
+  const log = (flow: string, packet: Packet) => {
+    const inspected = Deno.inspect(packet, {
+      colors: getColorEnabled(),
+      depth: 8,
+      iterableLimit: 50,
+    }).split("\n");
+    console.log(
+      new Date(),
+      gray(remoteAddress),
+      bold(flow),
+      inspected.slice(0, INSPECT_LINE_LIMIT).join("\n") +
+        (inspected.length > INSPECT_LINE_LIMIT
+          ? "\n" + gray("... " + (inspected.length - INSPECT_LINE_LIMIT) + " lines truncated")
+          : ""),
+    );
+  };
+
+  log("[C -> S]", modifiedHandshake);
+
+  await client.send(modifiedHandshake);
 
   let serverProtocol: Protocol<unknown, unknown> = handshakeProtocol;
   let serverHandler: PacketHandler | undefined;
-  let clientProtocol: Protocol<unknown, unknown> = handshakeProtocol;
-  let clientHandler: PacketHandler | undefined;
 
-  const setServerProtocol = <H extends PacketHandler>(
-    protocol: Protocol<H, unknown>,
-    handler?: H,
+  const setServerProtocol = <Handler extends PacketHandler>(
+    protocol: Protocol<Handler, unknown>,
+    handler?: Handler,
   ) => {
     conn.setServerProtocol(protocol);
     serverProtocol = protocol;
     serverHandler = handler;
   };
 
-  const setClientProtocol = <H extends PacketHandler>(
-    protocol: Protocol<unknown, H>,
-    handler?: H,
+  let clientProtocol: Protocol<unknown, unknown> = handshakeProtocol;
+  let clientHandler: PacketHandler | undefined;
+
+  const setClientProtocol = <Handler extends PacketHandler>(
+    protocol: Protocol<unknown, Handler>,
+    handler?: Handler,
   ) => {
     client.setClientProtocol(protocol);
     clientProtocol = protocol;
     clientHandler = handler;
   };
 
-  if (handshake.intention == "status") {
-    setServerProtocol(statusProtocol);
-    setClientProtocol(statusProtocol);
-  } else if (handshake.intention == "login") {
+  const skipPackets = new WeakSet<Packet>();
+
+  if (handshake.intention == "login") {
     setServerProtocol(loginProtocol);
+    const hello = await conn.receive();
+    if (!(hello instanceof ServerboundHelloPacket)) return false;
 
     setClientProtocol(loginProtocol, {
-      async handleGameProfile() {
+      async handleGameProfile(packet) {
+        await conn.send(packet);
+        setServerProtocol(gameProtocol);
         setClientProtocol(gameProtocol);
+        skipPackets.add(packet);
       },
       async handleLoginCompression(packet) {
         client.setCompressionThreshold(packet.compressionThreshold);
+        skipPackets.add(packet);
       },
-      async handleHello() {
-        await conn.send(
-          new ClientboundLoginDisconnectPacket(Component.literal("Encryption not supported")),
+      async handleHello(packet) {
+        if (profile == null) {
+          await conn.send(
+            new ClientboundLoginDisconnectPacket(
+              Component.literal("Proxy requires profile for online servers"),
+            ),
+          );
+          return client.close();
+        }
+
+        if (hello.publicKey && hello.profileId?.toString() != profile.id) {
+          await conn.send(
+            new ClientboundLoginDisconnectPacket(
+              Component.literal("Please login using the profile " + profile.name),
+            ),
+          );
+          return client.close();
+        }
+
+        const publicKey = await importRsaPublicKey(packet.publicKey);
+        const key = crypto.getRandomValues(new Uint8Array(16));
+        const encryptedKey = await encryptRsaPkcs1(publicKey, key);
+        const serverId = await hashServerId(packet.serverId, key, packet.publicKey);
+
+        const response = await fetch(
+          "https://sessionserver.mojang.com/session/minecraft/join",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              accessToken: profile.accessToken,
+              selectedProfile: profile.id,
+              serverId,
+            }),
+          },
         );
-        client.close();
+
+        if (!response.ok) throw new Error("Failed to join server");
+
+        let keyPacket: ServerboundKeyPacket;
+        if (hello.publicKey != null) {
+          const profileKeys = await getProfileKeys(profile.id, profile.accessToken);
+          const salt = crypto.getRandomValues(new BigUint64Array(1))[0]!;
+          const msg = new Writer().write(packet.nonce).writeLong(salt).bytes();
+          const signature = new Uint8Array(await signRsaPkcs1Sha256(profileKeys.privateKey, msg));
+          keyPacket = new ServerboundKeyPacket(
+            encryptedKey,
+            { type: "salt_signature", salt, signature },
+          );
+        } else {
+          const nonce = await encryptRsaPkcs1(publicKey, packet.nonce);
+          keyPacket = new ServerboundKeyPacket(encryptedKey, { type: "nonce", nonce });
+        }
+
+        log("[C -> S]", keyPacket);
+        await client.send(keyPacket);
+
+        client.setEncryption(key);
+        skipPackets.add(packet);
       },
     });
-  } else {
-    client.close();
-    return;
+
+    if (profile == null) {
+      log("[C -> S]", hello);
+      await client.send(hello);
+    } else {
+      const profileKeys = hello.publicKey
+        ? await getProfileKeys(profile.id, profile.accessToken)
+        : null;
+      const modifiedHello = new ServerboundHelloPacket(
+        profile.name,
+        profileKeys
+          ? {
+            expiresAt: profileKeys.expiresAt,
+            key: profileKeys.publicKey,
+            keySignature: profileKeys.publicKeySignature,
+          }
+          : null,
+        Uuid.from(profile.id),
+      );
+      log("[C -> S]", modifiedHello);
+      await client.send(modifiedHello);
+    }
+  } else if (handshake.intention == "status") {
+    setServerProtocol(statusProtocol);
+    setClientProtocol(statusProtocol);
   }
+
+  let connectionClosedByServer = false;
 
   (async () => {
-    while (true) {
+    while (!conn.closed) {
       const buf = await client.receiveRaw();
       if (buf == null) break;
-
       const packet = clientProtocol.deserializeClientbound(buf);
-      log("S -> C", packet);
-
-      const serialized = clientProtocol.serializeClientbound(packet);
-      if (!equals(buf, serialized)) {
-        assertEquals(serialized, buf, "Mismatch between deserialization and serialization");
-      }
-
       if (clientHandler) await packet.handle(clientHandler);
-      if (packet instanceof ClientboundLoginCompressionPacket) continue;
+      if (skipPackets.has(packet) || conn.closed) continue;
       await conn.send(packet);
-
-      if (packet instanceof ClientboundGameProfilePacket) {
-        setServerProtocol(gameProtocol);
-      }
+      if (FILTERED_PACKETS.has(packet.constructor)) continue;
+      log("[S -> C]", packet);
     }
   })().catch((e) => {
-    if (!(e instanceof Deno.errors.Interrupted)) console.error("error in proxy handler:", e);
-    if (!conn.closed) conn.close();
+    console.error("error in client receive loop:", e);
   }).finally(() => {
     if (!client.closed) client.close();
+    connectionClosedByServer = true;
   });
 
-  while (true) {
+  while (!client.closed) {
     const buf = await conn.receiveRaw();
     if (buf == null) break;
-
     const packet = serverProtocol.deserializeServerbound(buf);
-    log("C -> S", packet);
-
-    const serialized = serverProtocol.serializeServerbound(packet);
-    if (!equals(buf, serialized)) {
-      assertEquals(serialized, buf, "Mismatch between deserialization and serialization");
-    }
-
     if (serverHandler) await packet.handle(serverHandler);
+    if (skipPackets.has(packet) || client.closed) continue;
     await client.send(packet);
+    if (FILTERED_PACKETS.has(packet.constructor)) continue;
+    log("[C -> S]", packet);
   }
 
-  log();
-  if (!client.closed) client.close();
+  return connectionClosedByServer;
 }
 
-async function runProxyServer() {
-  const args = flags.parse(Deno.args, {
-    string: ["hostname", "port"],
-    default: { hostname: "0.0.0.0", port: 25566 },
-  });
-
-  const hostname = args.hostname;
-  const port = Number(args.port);
-
-  const address = args._[0]?.toString() ?? "localhost:25565";
-  if (!address) throw new Error("No address specified");
-
-  const serverAddress = parseServerAddress(address);
-  const listener = Deno.listen({ hostname, port });
-
-  for await (const denoConn of listener) {
-    const remoteNetAddr = denoConn.remoteAddr as Deno.NetAddr;
-    const remoteAddr = `${remoteNetAddr.hostname}:${remoteNetAddr.port}`;
-    console.log(new Date(), C.gray(remoteAddr), C.brightGreen("incoming connection"));
-
-    const connection = new Connection(denoConn);
-    await handleConnection(connection, serverAddress, remoteAddr).catch((e) => {
-      console.error("error in server handler:", e);
-    }).finally(() => {
-      if (!connection.closed) connection.close();
-      console.log(new Date(), C.gray(remoteAddr), C.brightRed("connection closed"));
-    });
-  }
-}
-
-await runProxyServer();
+await main();
