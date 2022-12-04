@@ -359,15 +359,19 @@ async function handleConnection(
     }
   });
 
-  while (true) {
-    const buf = await conn.receiveRaw();
-    if (buf == null) break;
-    const packet = serverProtocol.deserializeServerbound(buf);
-    if (serverHandler) await packet.handle(serverHandler);
-    if (skipPackets.has(packet) || client.closed) continue;
-    await client.send(packet);
-    if (FILTERED_PACKETS.has(packet.constructor)) continue;
-    log("[C -> S]", packet);
+  try {
+    while (true) {
+      const buf = await conn.receiveRaw();
+      if (buf == null) break;
+      const packet = serverProtocol.deserializeServerbound(buf);
+      if (serverHandler) await packet.handle(serverHandler);
+      if (skipPackets.has(packet) || client.closed) continue;
+      await client.send(packet);
+      if (FILTERED_PACKETS.has(packet.constructor)) continue;
+      log("[C -> S]", packet);
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.Interrupted)) throw e;
   }
 
   if (!client.closed) client.close();
