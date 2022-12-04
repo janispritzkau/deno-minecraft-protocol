@@ -165,10 +165,10 @@ async function handleConnection(
 
   if (handshake.intention == "login" && handshake.protocolVersion != 760) {
     conn.setServerProtocol(loginProtocol);
-    await conn.receive();
+    await conn.receiveRaw();
     await conn.send(
       new ClientboundLoginDisconnectPacket(
-        Component.literal("Unsupported protocol version"),
+        Component.literal("[Proxy] Unsupported protocol version"),
       ),
     );
     return false;
@@ -251,7 +251,7 @@ async function handleConnection(
         if (profile == null) {
           await conn.send(
             new ClientboundLoginDisconnectPacket(
-              Component.literal("Proxy requires profile for online servers"),
+              Component.literal("[Proxy] Profile required for online servers"),
             ),
           );
           return client.close();
@@ -260,7 +260,7 @@ async function handleConnection(
         if (hello.publicKey && hello.profileId?.toString() != profile.id) {
           await conn.send(
             new ClientboundLoginDisconnectPacket(
-              Component.literal("Please login using the profile " + profile.name),
+              Component.literal("[Proxy] Please login using this profile: " + profile.name),
             ),
           );
           return client.close();
@@ -349,13 +349,17 @@ async function handleConnection(
       log("[S -> C]", packet);
     }
   })().catch((e) => {
+    if (e instanceof Deno.errors.Interrupted) return;
     console.error("error in client receive loop:", e);
   }).finally(() => {
     if (!client.closed) client.close();
-    connectionClosedByServer = true;
+    if (!conn.closed) {
+      conn.close();
+      connectionClosedByServer = true;
+    }
   });
 
-  while (!client.closed) {
+  while (true) {
     const buf = await conn.receiveRaw();
     if (buf == null) break;
     const packet = serverProtocol.deserializeServerbound(buf);
@@ -366,6 +370,7 @@ async function handleConnection(
     log("[C -> S]", packet);
   }
 
+  if (!client.closed) client.close();
   return connectionClosedByServer;
 }
 
