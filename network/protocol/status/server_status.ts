@@ -31,12 +31,18 @@ export function deserializeServerStatus(value: unknown): ServerStatus {
         return { id: json.asString(player.id), name: json.asString(player.name) };
       });
     }
-    status.players = Object.freeze(status.players);
+  }
+  if ("version" in value) {
+    const version = json.asObject(value.version);
+    status.version = {
+      name: json.asString(version.name),
+      protocol: json.asNumber(version.protocol),
+    };
   }
   if ("favicon" in value) status.favicon = json.asString(value.favicon);
   status.previewsChat = json.asBoolean(value.previewsChat);
   status.enforcesSecureChat = json.asBoolean(value.enforcesSecureChat);
-  return Object.freeze(status);
+  return status;
 }
 
 export function serializeServerStatus(status: ServerStatus): unknown {
